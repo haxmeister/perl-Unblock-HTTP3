@@ -252,46 +252,6 @@ unblock_http3_header_block_free_all(
     native->header_blocks = NULL;
 }
 
-static SV *
-unblock_http3_bless_header_block(
-    unblock_http3_header_block *block
-)
-{
-    SV *inner = newSViv(PTR2IV(block));
-    SV *rv = newRV_noinc(inner);
-
-    sv_bless(
-        rv,
-        gv_stashpv(
-            "Unblock::HTTP3::_Native::HeaderBlock",
-            GV_ADD
-        )
-    );
-
-    return rv;
-}
-
-static unblock_http3_header_block *
-unblock_http3_header_block_from_sv(SV *self)
-{
-    unblock_http3_header_block *block;
-
-    if (!SvROK(self)) {
-        croak("native HTTP/3 header block is not a reference");
-    }
-
-    block = INT2PTR(
-        unblock_http3_header_block *,
-        SvIV(SvRV(self))
-    );
-
-    if (block == NULL) {
-        croak("native HTTP/3 header block has been destroyed");
-    }
-
-    return block;
-}
-
 static int
 unblock_http3_captured_name_equal(
     const unblock_http3_captured_field *field,
@@ -1244,7 +1204,7 @@ unblock_http3_end_headers_cb(
     unblock_http3_native_conn *native =
         (unblock_http3_native_conn *)conn_user_data;
     unblock_http3_header_block *block =
-        unblock_http3_header_block_remove(native, stream_id);
+        unblock_http3_header_block_find(native, stream_id);
     AV *event;
 
     (void)conn;
@@ -1255,7 +1215,6 @@ unblock_http3_end_headers_cb(
     }
 
     event = unblock_http3_event_new("headers", stream_id);
-    av_push(event, unblock_http3_bless_header_block(block));
     av_push(event, newSVuv((UV)block->field_section_size));
     av_push(event, newSViv(fin ? 1 : 0));
     unblock_http3_push_event(native, event);
@@ -2459,30 +2418,30 @@ _new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
     OUTPUT:
         RETVAL
 
-MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native::HeaderBlock
-
-UV
-field_section_size(self)
-    SV *self
-    PREINIT:
-        unblock_http3_header_block *block;
-    CODE:
-        block = unblock_http3_header_block_from_sv(self);
-        RETVAL = (UV)block->field_section_size;
-    OUTPUT:
-        RETVAL
+MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native::Connection
 
 SV *
-pseudo(self, name)
+header_pseudo(self, stream_id, name)
     SV *self
+    IV stream_id
     SV *name
     PREINIT:
+        unblock_http3_native_conn *native;
         unblock_http3_header_block *block;
         STRLEN namelen;
         const char *name_bytes;
         const unblock_http3_captured_field *field;
     CODE:
-        block = unblock_http3_header_block_from_sv(self);
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
         name_bytes = SvPVbyte(name, namelen);
         field = unblock_http3_header_block_pseudo(
             block,
@@ -2502,17 +2461,28 @@ pseudo(self, name)
         RETVAL
 
 SV *
-header_values(self, name)
+header_values(self, stream_id, name)
     SV *self
+    IV stream_id
     SV *name
     PREINIT:
+        unblock_http3_native_conn *native;
         unblock_http3_header_block *block;
         STRLEN namelen;
         const char *name_bytes;
         AV *values;
         size_t i;
     CODE:
-        block = unblock_http3_header_block_from_sv(self);
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
         name_bytes = SvPVbyte(name, namelen);
         values = newAV();
 
@@ -2549,16 +2519,27 @@ header_values(self, name)
         RETVAL
 
 int
-has_header(self, name)
+has_header(self, stream_id, name)
     SV *self
+    IV stream_id
     SV *name
     PREINIT:
+        unblock_http3_native_conn *native;
         unblock_http3_header_block *block;
         STRLEN namelen;
         const char *name_bytes;
         size_t i;
     CODE:
-        block = unblock_http3_header_block_from_sv(self);
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
         name_bytes = SvPVbyte(name, namelen);
         RETVAL = 0;
 
@@ -2588,8 +2569,9 @@ has_header(self, name)
         RETVAL
 
 SV *
-uniform_request(self, method, target, scheme, authority, protocol, fin)
+receive_uniform_request(self, stream_id, method, target, scheme, authority, protocol, fin)
     SV *self
+    IV stream_id
     SV *method
     SV *target
     SV *scheme
@@ -2597,9 +2579,20 @@ uniform_request(self, method, target, scheme, authority, protocol, fin)
     SV *protocol
     IV fin
     PREINIT:
+        unblock_http3_native_conn *native;
         unblock_http3_header_block *block;
+        unblock_http3_header_block *removed;
     CODE:
-        block = unblock_http3_header_block_from_sv(self);
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
         RETVAL = unblock_http3_header_block_uniform_request(
             aTHX_ block,
             method,
@@ -2609,47 +2602,64 @@ uniform_request(self, method, target, scheme, authority, protocol, fin)
             protocol,
             fin ? 1 : 0
         );
+
+        removed = unblock_http3_header_block_remove(
+            native,
+            (int64_t)stream_id
+        );
+        unblock_http3_header_block_free(removed);
     OUTPUT:
         RETVAL
 
 SV *
-uniform_response(self, status, fin)
+receive_uniform_response(self, stream_id, status, fin)
     SV *self
+    IV stream_id
     IV status
     IV fin
     PREINIT:
+        unblock_http3_native_conn *native;
         unblock_http3_header_block *block;
+        unblock_http3_header_block *removed;
     CODE:
-        block = unblock_http3_header_block_from_sv(self);
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
         RETVAL = unblock_http3_header_block_uniform_response(
             aTHX_ block,
             status,
             fin ? 1 : 0
         );
+
+        removed = unblock_http3_header_block_remove(
+            native,
+            (int64_t)stream_id
+        );
+        unblock_http3_header_block_free(removed);
     OUTPUT:
         RETVAL
 
 void
-DESTROY(self)
+discard_header_block(self, stream_id)
     SV *self
+    IV stream_id
     PREINIT:
+        unblock_http3_native_conn *native;
         unblock_http3_header_block *block;
     CODE:
-        if (!SvROK(self)) {
-            XSRETURN_EMPTY;
-        }
-
-        block = INT2PTR(
-            unblock_http3_header_block *,
-            SvIV(SvRV(self))
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_remove(
+            native,
+            (int64_t)stream_id
         );
-
-        if (block != NULL) {
-            unblock_http3_header_block_free(block);
-            sv_setiv(SvRV(self), 0);
-        }
-
-MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native::Connection
+        unblock_http3_header_block_free(block);
 
 const char *
 role(self)
