@@ -2636,6 +2636,9 @@ sub _rollback_rejected_early_data {
     $self->{control_settings_rewritten} = 0;
     $self->{control_settings_delta} = 0;
     $self->{control_settings_pending} = undef;
+    delete $self->{control_stream_id};
+    delete $self->{qpack_encoder_stream_id};
+    delete $self->{qpack_decoder_stream_id};
 
     $self->{native} = Unblock::HTTP3::_Native->client(
         $self->{max_field_section_size},

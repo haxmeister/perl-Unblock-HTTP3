@@ -61,9 +61,9 @@ sub run_target {
     my $peer = pack_sockaddr_in($port, $address);
 
     my $socket = IO::Socket::INET->new(
-        LocalAddr => '0.0.0.0',
-        LocalPort => 0,
-        Proto     => 'udp',
+        PeerAddr => $host,
+        PeerPort => $port,
+        Proto    => 'udp',
     );
 
     ok(defined($socket), 'creates UDP socket')
