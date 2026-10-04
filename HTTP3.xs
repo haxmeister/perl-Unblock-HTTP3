@@ -1073,9 +1073,9 @@ unblock_http3_begin_headers_cb(
     (void)conn;
     (void)stream_user_data;
 
-    unblock_http3_push_event(
+    (void)unblock_http3_header_block_create(
         native,
-        unblock_http3_event_new("begin_headers", stream_id)
+        stream_id
     );
 
     return 0;
@@ -1095,18 +1095,23 @@ unblock_http3_recv_header_cb(
 {
     unblock_http3_native_conn *native =
         (unblock_http3_native_conn *)conn_user_data;
+    unblock_http3_header_block *block =
+        unblock_http3_header_block_find(native, stream_id);
     nghttp3_vec nbuf = nghttp3_rcbuf_get_buf(name);
     nghttp3_vec vbuf = nghttp3_rcbuf_get_buf(value);
-    AV *event = unblock_http3_event_new("header", stream_id);
 
     (void)conn;
     (void)token;
     (void)flags;
     (void)stream_user_data;
 
-    av_push(event, newSVpvn((const char *)nbuf.base, nbuf.len));
-    av_push(event, newSVpvn((const char *)vbuf.base, vbuf.len));
-    unblock_http3_push_event(native, event);
+    unblock_http3_header_block_append(
+        block,
+        nbuf.base,
+        nbuf.len,
+        vbuf.base,
+        vbuf.len
+    );
 
     return 0;
 }
@@ -1122,11 +1127,19 @@ unblock_http3_end_headers_cb(
 {
     unblock_http3_native_conn *native =
         (unblock_http3_native_conn *)conn_user_data;
-    AV *event = unblock_http3_event_new("end_headers", stream_id);
+    unblock_http3_header_block *block =
+        unblock_http3_header_block_remove(native, stream_id);
+    AV *event;
 
     (void)conn;
     (void)stream_user_data;
 
+    if (block == NULL) {
+        croak("HTTP/3 header section ended without beginning");
+    }
+
+    event = unblock_http3_event_new("headers", stream_id);
+    av_push(event, unblock_http3_bless_header_block(block));
     av_push(event, newSViv(fin ? 1 : 0));
     unblock_http3_push_event(native, event);
 
