@@ -1124,6 +1124,8 @@ sub request {
         unless blessed($request)
             && $request->isa('Uniform::HTTP::Request');
 
+    _assert_http3_version($request, 'request()');
+
     my $is_connect = $request->method eq 'CONNECT' ? 1 : 0;
     my $is_extended_connect =
         $is_connect && defined($request->protocol) ? 1 : 0;
@@ -1260,6 +1262,18 @@ sub next_informational {
 
     croak 'next_informational() does not accept arguments' if @args;
     return shift @{ $self->{ready_informational} };
+}
+
+sub _assert_http3_version {
+    my ($message, $operation) = @_;
+
+    my $version = $message->version;
+    return unless defined $version;
+
+    croak "$operation: explicit message version must be 3 for HTTP/3"
+        unless "$version" eq '3';
+
+    return;
 }
 
 sub _declared_content_length {
@@ -1415,6 +1429,8 @@ sub _send_informational_response {
             && $self->{transactions}{ $transaction->stream_id } == $transaction;
     croak 'final response has already started'
         if $self->{response_sent}{ $transaction->stream_id };
+    _assert_http3_version($response, 'send_informational()');
+
     croak 'informational response status must be 100 through 199, excluding 101'
         unless $response->status >= 100
             && $response->status <= 199
@@ -1512,6 +1528,8 @@ sub _send_transaction_response {
 
     my $response = $transaction->response
         or croak 'Transaction has no response';
+
+    _assert_http3_version($response, 'send_response()');
 
     $self->_assert_response_message_allowed(
         $transaction,

@@ -132,6 +132,52 @@ is(
     'ordinary HTTP/3 field names are encoded lowercase',
 );
 
+my $neutral_version = Unblock::HTTP3::Request->new(
+    method => 'GET',
+    target => '/',
+);
+
+is(
+    Unblock::HTTP3::Connection::_assert_http3_version(
+        $neutral_version,
+        'test',
+    ),
+    undef,
+    'HTTP/3 accepts an unspecified Uniform message version',
+);
+
+my $http3_version = Unblock::HTTP3::Request->new(
+    method  => 'GET',
+    target  => '/',
+    version => '3',
+);
+
+is(
+    Unblock::HTTP3::Connection::_assert_http3_version(
+        $http3_version,
+        'test',
+    ),
+    undef,
+    'HTTP/3 accepts an explicit version 3',
+);
+
+my $wrong_version = Unblock::HTTP3::Request->new(
+    method  => 'GET',
+    target  => '/',
+    version => '2',
+);
+
+like(
+    dies {
+        Unblock::HTTP3::Connection::_assert_http3_version(
+            $wrong_version,
+            'test',
+        );
+    },
+    qr/explicit message version must be 3/,
+    'HTTP/3 rejects an explicitly incompatible Uniform version',
+);
+
 my $extended_request = Unblock::HTTP3::Request->new(
     method    => 'CONNECT',
     protocol  => 'test-protocol',

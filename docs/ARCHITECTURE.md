@@ -66,6 +66,11 @@ Uniform neutral: it can represent temporarily incomplete or cross-field-invalid
 message combinations while the selected protocol engine remains responsible
 for deciding what is legal on its wire.
 
+An application-created Uniform request may leave `version` undefined. If a
+message carries an explicit version, Unblock::HTTP3 requires it to be `3`
+before sending so incompatible metadata is not silently placed on an HTTP/3
+connection.
+
 Uniform owns:
 
 - method, target, scheme, authority, and Extended CONNECT protocol metadata
