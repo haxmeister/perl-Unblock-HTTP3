@@ -29,6 +29,8 @@ typedef struct unblock_http3_body {
 typedef struct {
     nghttp3_conn *conn;
     AV *events;
+    uint8_t *origin_list_data;
+    nghttp3_vec origin_list;
     unblock_http3_body *bodies;
     size_t streaming_retained_bytes;
     int is_server;
@@ -426,6 +428,45 @@ unblock_http3_recv_settings2_cb(
 }
 
 static int
+unblock_http3_recv_origin_cb(
+    nghttp3_conn *conn,
+    const uint8_t *origin,
+    size_t originlen,
+    void *conn_user_data
+)
+{
+    unblock_http3_native_conn *native =
+        (unblock_http3_native_conn *)conn_user_data;
+    AV *event = unblock_http3_event_new("origin", -1);
+
+    (void)conn;
+
+    av_push(event, newSVpvn((const char *)origin, originlen));
+    unblock_http3_push_event(native, event);
+
+    return 0;
+}
+
+static int
+unblock_http3_end_origin_cb(
+    nghttp3_conn *conn,
+    void *conn_user_data
+)
+{
+    unblock_http3_native_conn *native =
+        (unblock_http3_native_conn *)conn_user_data;
+
+    (void)conn;
+
+    unblock_http3_push_event(
+        native,
+        unblock_http3_event_new("end_origin", -1)
+    );
+
+    return 0;
+}
+
+static int
 unblock_http3_recv_data_cb(
     nghttp3_conn *conn,
     int64_t stream_id,
@@ -774,7 +815,8 @@ unblock_http3_new_conn(
     uint64_t qpack_max_table_capacity,
     uint64_t qpack_blocked_streams,
     int enable_connect_protocol,
-    int h3_datagram
+    int h3_datagram,
+    SV *origin_list_sv
 )
 {
     unblock_http3_native_conn *native;
@@ -789,6 +831,8 @@ unblock_http3_new_conn(
 
     callbacks.acked_stream_data = unblock_http3_acked_stream_data_cb;
     callbacks.recv_settings2 = unblock_http3_recv_settings2_cb;
+    callbacks.recv_origin = unblock_http3_recv_origin_cb;
+    callbacks.end_origin = unblock_http3_end_origin_cb;
     callbacks.recv_data = unblock_http3_recv_data_cb;
     callbacks.deferred_consume = unblock_http3_deferred_consume_cb;
     callbacks.begin_headers = unblock_http3_begin_headers_cb;
@@ -810,6 +854,26 @@ unblock_http3_new_conn(
     settings.enable_connect_protocol = enable_connect_protocol ? 1 : 0;
     settings.h3_datagram = h3_datagram ? 1 : 0;
 
+    if (is_server && origin_list_sv != NULL && SvOK(origin_list_sv)) {
+        STRLEN origin_list_len;
+        const char *origin_list_bytes =
+            SvPVbyte(origin_list_sv, origin_list_len);
+
+        if (origin_list_len != 0) {
+            Newx(native->origin_list_data, origin_list_len, uint8_t);
+            Copy(
+                origin_list_bytes,
+                native->origin_list_data,
+                origin_list_len,
+                uint8_t
+            );
+        }
+
+        native->origin_list.base = native->origin_list_data;
+        native->origin_list.len = (size_t)origin_list_len;
+        settings.origin_list = &native->origin_list;
+    }
+
     if (is_server) {
         rv = nghttp3_conn_server_new(
             &native->conn,
@@ -830,6 +894,9 @@ unblock_http3_new_conn(
 
     if (rv != 0) {
         SvREFCNT_dec((SV *)native->events);
+        if (native->origin_list_data != NULL) {
+            Safefree(native->origin_list_data);
+        }
         Safefree(native);
         unblock_http3_fail("could not create libnghttp3 connection", rv);
     }
@@ -983,18 +1050,20 @@ _new_client(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
             (uint64_t)qpack_max_table_capacity,
             (uint64_t)qpack_blocked_streams,
             enable_connect_protocol ? 1 : 0,
-            h3_datagram ? 1 : 0
+            h3_datagram ? 1 : 0,
+            &PL_sv_undef
         );
     OUTPUT:
         RETVAL
 
 SV *
-_new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, enable_connect_protocol, h3_datagram)
+_new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, enable_connect_protocol, h3_datagram, origin_list)
     UV max_field_section_size
     UV qpack_max_table_capacity
     UV qpack_blocked_streams
     IV enable_connect_protocol
     IV h3_datagram
+    SV *origin_list
     CODE:
         if (
             (uint64_t)max_field_section_size > UNBLOCK_HTTP3_MAX_VARINT ||
@@ -1010,7 +1079,8 @@ _new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
             (uint64_t)qpack_max_table_capacity,
             (uint64_t)qpack_blocked_streams,
             enable_connect_protocol ? 1 : 0,
-            h3_datagram ? 1 : 0
+            h3_datagram ? 1 : 0,
+            origin_list
         );
     OUTPUT:
         RETVAL
@@ -1728,6 +1798,11 @@ DESTROY(self)
             if (native->events != NULL) {
                 SvREFCNT_dec((SV *)native->events);
                 native->events = NULL;
+            }
+
+            if (native->origin_list_data != NULL) {
+                Safefree(native->origin_list_data);
+                native->origin_list_data = NULL;
             }
 
             unblock_http3_body_free_all(native);

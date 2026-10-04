@@ -804,6 +804,68 @@ sub _assert_request_semantics {
     return;
 }
 
+sub _valid_origin_serialization {
+    my ($value) = @_;
+
+    return 0 unless defined($value) && !ref($value);
+    return 0 if $value =~ /[^\x00-\x7f]/;
+    return 0 if $value =~ /[\x00-\x20\x7f]/;
+    return 0 if length($value) > 65_535;
+    return 1 if $value eq 'null';
+
+    my $scheme = qr/[A-Za-z][A-Za-z0-9+.-]*/;
+    my $reg_name =
+        qr/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}|[!\$&'()*+,;=])+/;
+    my $ip_literal =
+        qr/\[(?:[0-9A-Fa-f:.]+|[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!\$&'()*+,;=:-]+)\]/;
+
+    return $value =~ m{\A$scheme://(?:$ip_literal|$reg_name)(?::[0-9]+)?\z}
+        ? 1
+        : 0;
+}
+
+sub _normalize_origins {
+    my ($origins) = @_;
+
+    return undef unless defined $origins;
+
+    croak 'origins must be an array reference'
+        unless ref($origins) eq 'ARRAY';
+
+    my @normalized;
+
+    for my $origin (@$origins) {
+        croak 'each origin must be a defined scalar'
+            if !defined($origin) || ref($origin);
+
+        my $value = "$origin";
+
+        croak 'origin exceeds the RFC 9412 16-bit length limit'
+            if length($value) > 65_535;
+        croak 'origin must be an RFC 6454 ASCII serialization'
+            unless _valid_origin_serialization($value);
+
+        push @normalized, $value;
+    }
+
+    return \@normalized;
+}
+
+sub _serialize_origins {
+    my ($origins) = @_;
+
+    return undef unless defined $origins;
+
+    my $payload = '';
+
+    for my $origin (@$origins) {
+        $payload .= pack('n', length($origin));
+        $payload .= $origin;
+    }
+
+    return $payload;
+}
+
 sub client {
     my ($class, %args) = @_;
     return $class->_new('client', %args);
@@ -845,6 +907,7 @@ sub _new {
     my $enable_http_datagrams = exists $args{enable_http_datagrams}
         ? delete $args{enable_http_datagrams}
         : 0;
+    my $origins = _normalize_origins(delete $args{origins});
     my $datagram_request = delete $args{datagram_request};
     my $max_buffered_datagram_bytes =
         exists $args{max_buffered_datagram_bytes}
@@ -907,6 +970,8 @@ sub _new {
         if defined($datagram_request) && ref($datagram_request) ne 'CODE';
     croak 'datagram_request is only valid for a server connection'
         if $role ne 'server' && defined($datagram_request);
+    croak 'origins is only valid for a server connection'
+        if $role ne 'server' && defined($origins);
 
     croak 'quic_max_bidi_streams must be a non-negative integer'
         if !defined($quic_max_bidi_streams)
@@ -985,6 +1050,8 @@ sub _new {
     @local_settings{keys %$extension_settings}
         = values %$extension_settings;
 
+    my $origin_list = _serialize_origins($origins);
+
     if (defined $remembered_local_settings) {
         my $compatibility_error = _settings_compatibility_error(
             $remembered_local_settings,
@@ -1003,6 +1070,7 @@ sub _new {
             $qpack_blocked_streams,
             $enable_extended_connect,
             $enable_http_datagrams,
+            $origin_list,
         )
         : Unblock::HTTP3::_Native->client(
             $max_field_section_size,
@@ -1040,6 +1108,9 @@ sub _new {
             && _effective_setting($remembered_peer_settings, 8) eq '1'
             ? 1 : 0,
         enable_http_datagrams       => $enable_http_datagrams ? 1 : 0,
+        origins                     => $origins,
+        peer_origins                => undef,
+        peer_origin_pending         => [],
         peer_h3_datagram            => defined($remembered_peer_settings)
             && _effective_setting($remembered_peer_settings, 51) eq '1'
             ? 1 : 0,
@@ -1255,6 +1326,14 @@ sub peer_settings_received {
     my ($self, @args) = @_;
     croak 'peer_settings_received() does not accept arguments' if @args;
     return $self->{peer_settings_received} ? 1 : 0;
+}
+
+sub peer_origins {
+    my ($self, @args) = @_;
+    croak 'peer_origins() does not accept arguments' if @args;
+
+    return undef unless defined $self->{peer_origins};
+    return [ @{ $self->{peer_origins} } ];
 }
 
 sub extended_connect_enabled {
@@ -3164,6 +3243,23 @@ sub _drain_events {
             next;
         }
 
+        if ($type eq 'origin') {
+            push @{ $self->{peer_origin_pending} }, $args[0]
+                if _valid_origin_serialization($args[0]);
+            next;
+        }
+
+        if ($type eq 'end_origin') {
+            $self->{peer_origins} = []
+                unless defined $self->{peer_origins};
+
+            push @{ $self->{peer_origins} },
+                @{ $self->{peer_origin_pending} };
+
+            $self->{peer_origin_pending} = [];
+            next;
+        }
+
         if ($self->{rejected_streams}{$id}) {
             if ($type eq 'data') {
                 my $stream = $self->{streams}{$id};
@@ -4094,6 +4190,12 @@ Server only. Advertises Extended CONNECT support.
 Advertises RFC 9297 HTTP Datagram support. The Net::QUIC connection must also
 have QUIC DATAGRAM receive support.
 
+=item C<origins>
+
+Server only. Array reference of RFC 6454 ASCII origin serializations to send in
+the RFC 9412 ORIGIN frame. An empty array sends an explicit empty ORIGIN frame.
+Omit the option to send no ORIGIN frame.
+
 =item C<datagram_request>
 
 Server-only callback used to decide whether an incoming request uses HTTP
@@ -4299,6 +4401,15 @@ the new server SETTINGS frame arrives.
 =head2 peer_settings_received
 
 True after the peer SETTINGS frame has been accepted.
+
+=head2 peer_origins
+
+Returns undef until a complete RFC 9412 ORIGIN frame has been received.
+
+After that, returns a copy of the cumulative valid origin entries advertised by
+the server. An explicit empty ORIGIN frame therefore returns an empty array
+reference rather than undef. Invalid origin entries are ignored as required by
+RFC 8336.
 
 =head2 early_data_status
 
