@@ -1856,6 +1856,10 @@ sub _send_informational_response {
         $response,
         'send_informational()',
     );
+    _assert_capsule_protocol_response(
+        $response,
+        'send_informational()',
+    );
 
     my $view = Uniform::HTTP::FastPath::view($response);
     my @fields = (
@@ -1883,6 +1887,38 @@ sub _send_informational_response {
 
     $self->_drain_output;
     return $response;
+}
+
+sub _capsule_protocol_response_error {
+    my ($status, $headers) = @_;
+
+    my $present = 0;
+
+    for my $field (@$headers) {
+        my $name = lc($field->[0]);
+        if ($name eq 'capsule-protocol') {
+            $present = 1;
+            last;
+        }
+    }
+
+    return unless $present;
+    return if $status >= 200 && $status < 300;
+
+    return 'Capsule-Protocol is only valid on a successful HTTP/3 response';
+}
+
+sub _assert_capsule_protocol_response {
+    my ($response, $operation) = @_;
+
+    my $view = Uniform::HTTP::FastPath::view($response);
+    my $error = _capsule_protocol_response_error(
+        $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
+        $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
+    );
+
+    croak "$operation: $error" if defined $error;
+    return;
 }
 
 sub _response_content_forbidden_reason {
@@ -1960,6 +1996,10 @@ sub _send_transaction_response {
     );
     $self->_assert_response_content_length(
         $transaction,
+        $response,
+        'send_response()',
+    );
+    _assert_capsule_protocol_response(
         $response,
         'send_response()',
     );
@@ -3956,6 +3996,16 @@ sub _finish_headers {
     } else {
         croak 'HTTP/3 response is missing :status'
             unless defined $pseudo->{':status'};
+
+        my $capsule_error = _capsule_protocol_response_error(
+            0 + $pseudo->{':status'},
+            $building->{headers},
+        );
+
+        if (defined $capsule_error) {
+            $self->_reject_message_stream($id, $capsule_error);
+            return;
+        }
 
         $message = _received_response(
             $pseudo->{':status'},
