@@ -609,8 +609,21 @@ sub _inspect_peer_settings_bytes {
 
             substr($state->{buffer}, 0, $length, '');
             $state->{remaining} -= $length;
-            $state->{settings}{ $state->{setting_id} } = $value;
-            delete $state->{setting_id};
+
+            my $setting_id = delete $state->{setting_id};
+
+            if (exists $state->{settings}{$setting_id}) {
+                $state->{stage} = 'ignore';
+                $state->{buffer} = '';
+
+                $self->_fail_connection(
+                    $H3_SETTINGS_ERROR,
+                    "peer sent duplicate HTTP/3 setting $setting_id",
+                );
+                return;
+            }
+
+            $state->{settings}{$setting_id} = $value;
             $state->{stage} = 'setting_id';
             next;
         }
@@ -2938,6 +2951,7 @@ sub _classify_peer_uni_stream {
                 $self->{core_uni_streams}{$id} = 1;
 
                 $self->_inspect_peer_settings_bytes($id, $bytes);
+                return 'failed' if $self->{failed};
 
                 my $result = $self->{native}->read_stream(
                     $id,
@@ -3147,6 +3161,7 @@ sub _service_stream {
             my ($bytes, $fin) = @$chunk;
 
             $self->_inspect_peer_settings_bytes($id, $bytes);
+            return if $self->{failed};
 
             my $result = $self->{native}->read_stream(
                 $id,
