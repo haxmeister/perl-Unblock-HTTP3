@@ -21,7 +21,7 @@ Covered by Unblock::HTTP3 and its tests:
 - connection-specific field rejection
 - Host and :authority validation
 - Content-Length validation
-- malformed-message stream rejection
+- Perl-layer malformed-message stream rejection
 - server-initiated bidirectional stream rejection
 - unauthorized server-push rejection when no push capacity was advertised
 - reserved and unknown unidirectional stream handling
