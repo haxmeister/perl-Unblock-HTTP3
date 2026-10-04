@@ -3,6 +3,7 @@ package Unblock::HTTP3::Connection;
 use strict;
 use warnings;
 use Carp qw(croak);
+use Uniform::HTTP::Request 0.04 ();
 use Scalar::Util qw(blessed weaken);
 use Time::HiRes ();
 
@@ -1119,9 +1120,9 @@ sub request {
 
     croak 'request() is only available on a client HTTP/3 connection'
         unless $self->{role} eq 'client';
-    croak 'request() requires a Unblock::HTTP3::Request object'
+    croak 'request() requires a Uniform::HTTP::Request object'
         unless blessed($request)
-            && $request->isa('Unblock::HTTP3::Request');
+            && $request->isa('Uniform::HTTP::Request');
 
     my $is_connect = $request->method eq 'CONNECT' ? 1 : 0;
     my $is_extended_connect =
@@ -1165,8 +1166,6 @@ sub request {
 
         $receive_body = 'stream';
         $stream_body = {};
-        $request->_begin_stream_body
-            unless $request->_has_incremental_body;
     }
 
     if (exists $option{stream_body}) {
@@ -1180,8 +1179,6 @@ sub request {
         croak 'request(): stream_body cannot be combined with a scalar Request body'
             if $request->has_buffered_body;
 
-        $request->_begin_stream_body
-            unless $request->_has_incremental_body;
     }
 
     if (exists $option{receive_body}) {
@@ -1209,18 +1206,27 @@ sub request {
         $request,
         'request()',
     );
+    my $request_streaming = defined($stream_body) ? 1 : 0;
+
     $self->_assert_request_content_length(
         $request,
         'request()',
+        $request_streaming,
     );
 
-    my $stream_id = $self->_submit_request($request);
+    my $stream_id = $self->_submit_request(
+        $request,
+        $request_streaming,
+    );
     return unless defined $stream_id;
 
+    $request->mark_incomplete if $request_streaming;
+
     my $transaction = Unblock::HTTP3::Transaction->_new(
-        connection => $self,
-        stream_id  => $stream_id,
-        request    => $request,
+        connection        => $self,
+        stream_id         => $stream_id,
+        request           => $request,
+        request_streaming => $request_streaming,
     );
 
     $transaction->_enable_datagrams if $datagrams;
@@ -1292,7 +1298,7 @@ sub _content_length_is_less_than {
 }
 
 sub _assert_request_content_length {
-    my ($self, $request, $operation) = @_;
+    my ($self, $request, $operation, $streaming) = @_;
 
     my $declared = _declared_content_length($request, $operation);
     return unless defined $declared;
@@ -1303,7 +1309,7 @@ sub _assert_request_content_length {
         return $declared;
     }
 
-    return $declared if $request->_has_incremental_body;
+    return $declared if $streaming;
 
     my $actual = $request->has_buffered_body
         ? length($request->body)
@@ -1340,7 +1346,7 @@ sub _assert_response_content_length {
         return $declared;
     }
 
-    return $declared if $response->_has_incremental_body;
+    return $declared if $transaction->_response_is_streaming;
 
     my $actual = $response->has_buffered_body
         ? length($response->body)
@@ -1435,8 +1441,7 @@ sub _send_informational_response {
         \@fields,
     );
 
-    $response->{_stream_id} = $transaction->stream_id;
-    $response->_commit;
+    $response->freeze;
 
     $self->_drain_output;
     return $response;
@@ -1486,7 +1491,7 @@ sub _assert_response_message_allowed {
 
     croak "$operation: $reason"
         if $response->has_buffered_body
-            || $response->_has_incremental_body
+            || $transaction->_response_is_streaming
             || $response->has_trailers;
 
     return;
@@ -1561,7 +1566,7 @@ sub _write_transaction_body {
         $message = $transaction->request;
 
         croak "$operation(): Request is not configured for incremental body production"
-            unless $message->_has_incremental_body;
+            unless $transaction->_request_is_streaming;
     } elsif ($kind eq 'response') {
         croak "$operation(): response body production requires a server connection"
             unless $self->{role} eq 'server';
@@ -1576,7 +1581,7 @@ sub _write_transaction_body {
         );
 
         croak "$operation(): Response is not configured for incremental body production"
-            unless $message->_has_incremental_body;
+            unless $transaction->_response_is_streaming;
 
         if (!$self->{response_sent}{$id}) {
             $self->{response_sent}{$id} = 1;
@@ -1703,11 +1708,12 @@ sub _cancel_transaction {
     $self->{native}->discard_body($id);
 
     $transaction->request->_mark_stop_sending($H3_REQUEST_CANCELLED)
-        if $self->{role} eq 'client';
+        if $self->{role} eq 'client'
+            && $transaction->request->can('_mark_stop_sending');
 
     my $response = $transaction->response;
     $response->_mark_reset($H3_REQUEST_CANCELLED)
-        if defined $response;
+        if defined($response) && $response->can('_mark_reset');
 
     $transaction->_mark_cancelled;
     return $transaction;
@@ -2072,7 +2078,7 @@ sub _maybe_complete_transaction {
         my $response = $transaction->response;
         return unless defined $response;
         return unless $response->is_complete;
-        return if $response->is_aborted;
+        return if $response->can('is_aborted') && $response->is_aborted;
 
         my $reader = $transaction->_incoming_body_reader('response');
         return if defined($reader) && !$reader->is_complete;
@@ -2089,7 +2095,7 @@ sub _maybe_complete_transaction {
 
     my $request = $transaction->request;
     return unless $request->is_complete;
-    return if $request->is_aborted;
+    return if $request->can('is_aborted') && $request->is_aborted;
 
     my $reader = $transaction->_incoming_body_reader('request');
     return if defined($reader) && !$reader->is_complete;
@@ -2097,7 +2103,9 @@ sub _maybe_complete_transaction {
     return unless $self->{output_finished}{$id};
 
     my $response = $transaction->response;
-    return if defined($response) && $response->is_aborted;
+    return if defined($response)
+        && $response->can('is_aborted')
+        && $response->is_aborted;
 
     $transaction->_mark_complete;
     $self->_cleanup_stream_if_done($id);
@@ -2604,7 +2612,7 @@ sub _service_stream {
 
         my $message = $self->{messages}{$id};
         $message->_mark_reset($remote_reset)
-            if defined $message;
+            if defined($message) && $message->can('_mark_reset');
 
         my $transaction = $self->{transactions}{$id};
         $transaction->_mark_cancelled
@@ -2621,7 +2629,7 @@ sub _service_stream {
 
         my $message = $self->{outgoing}{$id};
         $message->_mark_stop_sending($remote_stop)
-            if defined $message;
+            if defined($message) && $message->can('_mark_stop_sending');
 
         my $transaction = $self->{transactions}{$id};
         $transaction->_mark_cancelled
@@ -2747,9 +2755,7 @@ sub _drain_events {
                 next;
             }
 
-            my $current = $message->has_buffered_body
-                ? length($message->body)
-                : 0;
+            my $current = $transaction->_buffered_body_bytes($kind);
 
             if (
                 $current + length($bytes)
@@ -2762,7 +2768,7 @@ sub _drain_events {
                 next;
             }
 
-            $message->_append_received_body($bytes);
+            $transaction->_append_buffered_body($kind, $bytes);
 
             my $stream = $self->{streams}{$id};
             $stream->consume(length($bytes))
@@ -2779,16 +2785,25 @@ sub _drain_events {
         }
 
         if ($type eq 'end_stream') {
-            my $message = $self->{messages}{$id};
-            $message->_mark_complete if defined $message;
-
             my $transaction = $self->{transactions}{$id};
             if (defined $transaction) {
                 my $kind = $self->{role} eq 'server'
                     ? 'request'
                     : 'response';
                 my $reader = $transaction->_incoming_body_reader($kind);
-                $reader->_mark_end if defined $reader;
+
+                if (defined $reader) {
+                    $reader->_mark_end;
+
+                    my $message = $self->{messages}{$id};
+                    if (defined $message) {
+                        $message->freeze_trailers;
+                        $message->freeze;
+                        $message->mark_complete;
+                    }
+                } else {
+                    $transaction->_finish_received_message($kind);
+                }
             }
 
             $self->_maybe_complete_transaction($id);
@@ -2835,7 +2850,7 @@ sub _drain_events {
                 next;
             }
 
-            $message->_append_received_trailer(
+            $message->add_trailer(
                 $args[0],
                 $args[1],
             );
@@ -2844,6 +2859,8 @@ sub _drain_events {
 
         if ($type eq 'end_trailers') {
             delete $self->{trailer_field_section_size}{$id};
+            my $message = $self->{messages}{$id};
+            $message->freeze_trailers if defined $message;
             next;
         }
 
@@ -2967,9 +2984,12 @@ sub _finish_headers {
         }
 
         $message = Unblock::HTTP3::Request->new(%args);
-        $message->{_stream_id} = $id;
-        $message->_mark_incomplete unless $fin;
-        $message->_commit;
+        if ($fin) {
+            $message->freeze;
+        } else {
+            $message->mark_incomplete;
+            $message->freeze_initial;
+        }
 
         my $response = Unblock::HTTP3::Response->new(
             status  => 200,
@@ -3015,14 +3035,20 @@ sub _finish_headers {
             headers => $building->{headers},
         );
 
-        $message->{_stream_id} = $id;
-        $message->_mark_incomplete unless $fin;
-        $message->_commit;
+        if ($fin) {
+            $message->freeze;
+        } else {
+            $message->mark_incomplete;
+            $message->freeze_initial;
+        }
 
         my $transaction = $self->{transactions}{$id}
             or croak "received HTTP/3 response for unknown Transaction";
 
         if ($message->status < 200) {
+            $message->mark_complete;
+            $message->freeze;
+
             croak 'HTTP/3 does not use 101 Switching Protocols'
                 if $message->status == 101;
             croak 'informational HTTP/3 response cannot end the stream'
@@ -3180,15 +3206,15 @@ sub _wire_trailers {
 }
 
 sub _submit_request {
-    my ($self, $request) = @_;
+    my ($self, $request, $streaming) = @_;
 
     croak 'request submission requires a client HTTP/3 connection'
         unless $self->{role} eq 'client';
     croak 'HTTP/3 connection has not been started'
         unless $self->{started};
-    croak 'request must be a Unblock::HTTP3::Request object'
+    croak 'request must be a Uniform::HTTP::Request object'
         unless blessed($request)
-            && $request->isa('Unblock::HTTP3::Request');
+            && $request->isa('Uniform::HTTP::Request');
     my $is_connect = $request->method eq 'CONNECT' ? 1 : 0;
     my $is_extended_connect =
         $is_connect && defined($request->protocol) ? 1 : 0;
@@ -3257,7 +3283,7 @@ sub _submit_request {
     my $id = $stream->id;
     $self->{streams}{$id} = $stream;
 
-    my $streaming = $request->_has_incremental_body ? 1 : 0;
+    $streaming = $streaming ? 1 : 0;
     my $wire_body = $request->has_buffered_body
         ? $request->body
         : (!$streaming && $request->has_trailers ? '' : undef);
@@ -3276,8 +3302,7 @@ sub _submit_request {
         );
     }
 
-    $request->{_stream_id} = $id;
-    $request->_commit;
+    $request->freeze;
     $self->{outgoing}{$id} = $request;
 
     my $lifecycle = $self->{stream_lifecycle}{$id};
@@ -3287,7 +3312,7 @@ sub _submit_request {
     ) {
         $request->_mark_stop_sending(
             $lifecycle->{remote_stop_sending_code},
-        );
+        ) if $request->can('_mark_stop_sending');
     }
 
     $self->_drain_output;
@@ -3327,7 +3352,11 @@ sub _submit_response {
         'response trailers',
     ) if defined $wire_trailers;
 
-    my $streaming = $response->_has_incremental_body ? 1 : 0;
+    my $transaction = $self->{transactions}{$stream_id};
+    my $streaming = defined($transaction)
+        && $transaction->_response_is_streaming
+        ? 1
+        : 0;
     my $wire_body = $response->has_buffered_body
         ? $response->body
         : (!$streaming && $response->has_trailers ? '' : undef);
@@ -3346,8 +3375,7 @@ sub _submit_response {
         );
     }
 
-    $response->{_stream_id} = $stream_id;
-    $response->_commit;
+    $response->freeze;
     $self->{outgoing}{$stream_id} = $response;
 
     my $lifecycle = $self->{stream_lifecycle}{$stream_id};
@@ -3357,7 +3385,7 @@ sub _submit_response {
     ) {
         $response->_mark_stop_sending(
             $lifecycle->{remote_stop_sending_code},
-        );
+        ) if $response->can('_mark_stop_sending');
     }
 
     $self->_drain_output;
