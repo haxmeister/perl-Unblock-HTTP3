@@ -430,10 +430,9 @@ my $outgoing_request = Uniform::HTTP::Request->new(
     target    => '/',
     scheme    => 'https',
     authority => 'localhost',
-    priority  => {
-        urgency     => 5,
-        incremental => 1,
-    },
+    headers   => [
+        [ Priority => 'u=5, i' ],
+    ],
 );
 
 my $client_transaction = $client_h3->request($outgoing_request);
