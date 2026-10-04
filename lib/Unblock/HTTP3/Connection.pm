@@ -15,11 +15,13 @@ use Net::QUIC::Connection ();
 
 our $VERSION = '0.01';
 
+my $H3_DATAGRAM_ERROR = 0x33;
 my $H3_EXCESSIVE_LOAD = 0x0107;
 my $H3_SETTINGS_ERROR = 0x0109;
 my $H3_REQUEST_CANCELLED = 0x010c;
 my $H3_MESSAGE_ERROR = 0x010e;
 my $HTTP3_MAX_VARINT = '4611686018427387903';
+my $HTTP3_MAX_QUARTER_STREAM_ID = '1152921504606846975';
 
 my %CORE_SETTING_ID = map { $_ => 1 } qw(1 6 7 8 51);
 my %RESERVED_SETTING_ID = map { $_ => 1 } qw(0 2 3 4 5);
@@ -644,6 +646,18 @@ sub _new {
     my $enable_extended_connect = exists $args{enable_extended_connect}
         ? delete $args{enable_extended_connect}
         : 0;
+    my $enable_http_datagrams = exists $args{enable_http_datagrams}
+        ? delete $args{enable_http_datagrams}
+        : 0;
+    my $datagram_request = delete $args{datagram_request};
+    my $max_buffered_datagram_bytes =
+        exists $args{max_buffered_datagram_bytes}
+            ? delete $args{max_buffered_datagram_bytes}
+            : 1024 * 1024;
+    my $max_buffered_datagrams =
+        exists $args{max_buffered_datagrams}
+            ? delete $args{max_buffered_datagrams}
+            : 1024;
     my $has_quic_max_bidi_streams = exists $args{quic_max_bidi_streams};
     my $quic_max_bidi_streams = $has_quic_max_bidi_streams
         ? delete $args{quic_max_bidi_streams}
@@ -668,6 +682,15 @@ sub _new {
     croak 'enable_extended_connect is only valid for a server connection'
         if $role ne 'server' && $enable_extended_connect;
 
+    croak 'enable_http_datagrams must be 0 or 1'
+        if !defined($enable_http_datagrams)
+            || ref($enable_http_datagrams)
+            || "$enable_http_datagrams" !~ /\A[01]\z/;
+    croak 'datagram_request must be a code reference'
+        if defined($datagram_request) && ref($datagram_request) ne 'CODE';
+    croak 'datagram_request is only valid for a server connection'
+        if $role ne 'server' && defined($datagram_request);
+
     croak 'quic_max_bidi_streams must be a non-negative integer'
         if !defined($quic_max_bidi_streams)
             || ref($quic_max_bidi_streams)
@@ -679,12 +702,24 @@ sub _new {
         unless defined $quic;
     croak 'quic must be a Net::QUIC::Connection object'
         unless blessed($quic) && $quic->isa('Net::QUIC::Connection');
+    croak 'enable_http_datagrams requires QUIC DATAGRAM receive support'
+        if $enable_http_datagrams && !$quic->can_receive_datagram;
 
     croak 'send_buffer_limit must be a positive integer'
         unless defined($send_buffer_limit)
             && !ref($send_buffer_limit)
             && $send_buffer_limit =~ /\A[0-9]+\z/
             && $send_buffer_limit > 0;
+    croak 'max_buffered_datagram_bytes must be a positive integer'
+        unless defined($max_buffered_datagram_bytes)
+            && !ref($max_buffered_datagram_bytes)
+            && $max_buffered_datagram_bytes =~ /\A[0-9]+\z/
+            && $max_buffered_datagram_bytes > 0;
+    croak 'max_buffered_datagrams must be a positive integer'
+        unless defined($max_buffered_datagrams)
+            && !ref($max_buffered_datagrams)
+            && $max_buffered_datagrams =~ /\A[0-9]+\z/
+            && $max_buffered_datagrams > 0;
 
     for my $limit (
         [ max_field_section_size   => $max_field_section_size ],
@@ -729,12 +764,14 @@ sub _new {
             $qpack_max_table_capacity,
             $qpack_blocked_streams,
             $enable_extended_connect,
+            $enable_http_datagrams,
         )
         : Unblock::HTTP3::_Native->client(
             $max_field_section_size,
             $qpack_max_table_capacity,
             $qpack_blocked_streams,
             0,
+            $enable_http_datagrams,
         );
 
     $native->set_max_client_streams_bidi($quic_max_bidi_streams)
@@ -756,6 +793,14 @@ sub _new {
         receive_body_mode         => $receive_body,
         enable_extended_connect    => $enable_extended_connect ? 1 : 0,
         peer_enable_connect_protocol => 0,
+        enable_http_datagrams       => $enable_http_datagrams ? 1 : 0,
+        peer_h3_datagram            => 0,
+        datagram_request            => $datagram_request,
+        max_buffered_datagram_bytes => 0 + $max_buffered_datagram_bytes,
+        max_buffered_datagrams      => 0 + $max_buffered_datagrams,
+        datagram_buffered_bytes     => 0,
+        datagram_buffered_count     => 0,
+        datagram_receive_drops      => 0,
         extension_settings        => $extension_settings,
         peer_extension_settings   => {},
         peer_settings_received     => 0,
@@ -934,6 +979,46 @@ sub peer_extended_connect_enabled {
     return $self->{peer_enable_connect_protocol} ? 1 : 0;
 }
 
+sub http_datagrams_enabled {
+    my ($self, @args) = @_;
+    croak 'http_datagrams_enabled() does not accept arguments' if @args;
+    return $self->{enable_http_datagrams} ? 1 : 0;
+}
+
+sub peer_http_datagrams_enabled {
+    my ($self, @args) = @_;
+    croak 'peer_http_datagrams_enabled() does not accept arguments' if @args;
+    return $self->{peer_h3_datagram} ? 1 : 0;
+}
+
+sub can_send_http_datagrams {
+    my ($self, @args) = @_;
+    croak 'can_send_http_datagrams() does not accept arguments' if @args;
+
+    return 0 unless $self->{enable_http_datagrams};
+    return 0 unless $self->{peer_settings_received};
+    return 0 unless $self->{peer_h3_datagram};
+
+    return $self->{quic}->can_send_datagram ? 1 : 0;
+}
+
+sub can_receive_http_datagrams {
+    my ($self, @args) = @_;
+    croak 'can_receive_http_datagrams() does not accept arguments' if @args;
+
+    return 0 unless $self->{enable_http_datagrams};
+    return 0 unless $self->{peer_settings_received};
+    return 0 unless $self->{peer_h3_datagram};
+
+    return $self->{quic}->can_receive_datagram ? 1 : 0;
+}
+
+sub datagram_receive_drops {
+    my ($self, @args) = @_;
+    croak 'datagram_receive_drops() does not accept arguments' if @args;
+    return 0 + $self->{datagram_receive_drops};
+}
+
 sub extension_stream_handler {
     my ($self, $type, @args) = @_;
 
@@ -1044,6 +1129,14 @@ sub request {
     my $stream_body;
     my $receive_body = $self->{receive_body_mode};
     my $receive_options = {};
+    my $datagrams = exists $option{datagrams}
+        ? delete $option{datagrams}
+        : 0;
+
+    croak 'request(): datagrams must be 0 or 1'
+        if !defined($datagrams)
+            || ref($datagrams)
+            || "$datagrams" !~ /\A[01]\z/;
 
     if ($is_connect) {
         if ($is_extended_connect) {
@@ -1129,6 +1222,8 @@ sub request {
         stream_id  => $stream_id,
         request    => $request,
     );
+
+    $transaction->_enable_datagrams if $datagrams;
 
     $transaction->_configure_receive_body(
         'response',
@@ -1680,6 +1775,194 @@ sub _set_transaction_priority {
     return;
 }
 
+sub _send_transaction_datagram {
+    my ($self, $transaction, $bytes) = @_;
+
+    croak 'HTTP Datagram Transaction does not belong to this connection'
+        unless blessed($transaction)
+            && $transaction->isa('Unblock::HTTP3::Transaction')
+            && defined($self->{transactions}{ $transaction->stream_id })
+            && $self->{transactions}{ $transaction->stream_id } == $transaction;
+    croak 'HTTP Datagrams are not enabled for this Transaction'
+        unless $transaction->datagrams_enabled;
+    croak 'HTTP Datagram payload is required'
+        unless defined $bytes;
+    croak 'HTTP Datagram payload must be bytes, not a reference'
+        if ref($bytes);
+    croak 'HTTP/3 DATAGRAM is not negotiated with the peer'
+        unless $self->can_send_http_datagrams;
+
+    my $id = $transaction->stream_id;
+    croak 'HTTP Datagram request stream send side is closed'
+        if $self->{output_finished}{$id};
+
+    my $stream = $self->{streams}{$id};
+    croak 'HTTP Datagram request stream is no longer available'
+        unless defined $stream;
+    croak 'HTTP Datagram request stream send side is reset'
+        if defined $stream->local_reset_code;
+
+    my $quarter = $id >> 2;
+    my $prefix = _encode_http3_varint($quarter);
+    my $max = $self->_transaction_datagram_payload_size($transaction);
+
+    croak "HTTP Datagram payload exceeds current path capacity $max"
+        if length($bytes) > $max;
+
+    return $self->{quic}->send_datagram($prefix . $bytes) ? 1 : 0;
+}
+
+sub _transaction_datagram_payload_size {
+    my ($self, $transaction) = @_;
+
+    croak 'HTTP Datagram Transaction does not belong to this connection'
+        unless blessed($transaction)
+            && $transaction->isa('Unblock::HTTP3::Transaction')
+            && defined($self->{transactions}{ $transaction->stream_id })
+            && $self->{transactions}{ $transaction->stream_id } == $transaction;
+
+    return 0 unless $transaction->datagrams_enabled;
+    return 0 unless $self->can_send_http_datagrams;
+
+    my $capacity = $self->{quic}->max_datagram_payload_size;
+    return 0 unless defined($capacity) && $capacity > 0;
+
+    my $prefix = _encode_http3_varint($transaction->stream_id >> 2);
+    my $available = $capacity - length($prefix);
+
+    return $available > 0 ? $available : 0;
+}
+
+sub _buffer_transaction_datagram {
+    my ($self, $transaction, $bytes) = @_;
+
+    my $length = length($bytes);
+
+    if (
+        $self->{datagram_buffered_count} >= $self->{max_buffered_datagrams}
+        || $self->{datagram_buffered_bytes} + $length
+            > $self->{max_buffered_datagram_bytes}
+    ) {
+        ++$self->{datagram_receive_drops};
+        return;
+    }
+
+    ++$self->{datagram_buffered_count};
+    $self->{datagram_buffered_bytes} += $length;
+    $transaction->_enqueue_datagram($bytes);
+    return 1;
+}
+
+sub _datagram_dequeued {
+    my ($self, $length) = @_;
+
+    --$self->{datagram_buffered_count}
+        if $self->{datagram_buffered_count} > 0;
+    $self->{datagram_buffered_bytes} -= $length;
+    $self->{datagram_buffered_bytes} = 0
+        if $self->{datagram_buffered_bytes} < 0;
+
+    return;
+}
+
+sub _reject_datagram_stream {
+    my ($self, $transaction, $reason) = @_;
+
+    my $id = $transaction->stream_id;
+    my $stream = $self->{streams}{$id};
+
+    if (defined $stream) {
+        if ($stream->can_receive && !$stream->remote_finished) {
+            $self->{native}->shutdown_stream_read($id);
+            $stream->stop_sending($H3_DATAGRAM_ERROR);
+        }
+
+        if ($stream->can_send && !$self->{output_finished}{$id}) {
+            $self->{native}->shutdown_stream_write($id);
+            $stream->reset($H3_DATAGRAM_ERROR);
+        }
+    }
+
+    $self->{native}->discard_body($id);
+    $transaction->_mark_error($reason);
+    return;
+}
+
+sub _receive_quic_datagram {
+    my ($self, $bytes, $early_data) = @_;
+
+    return if $self->{failed};
+
+    # HTTP/3 0-RTT SETTINGS state is not retained yet. Early DATAGRAMs are
+    # unreliable, so drop them rather than accidentally accepting them under
+    # settings from a previous connection.
+    return if $early_data;
+
+    if (!$self->{enable_http_datagrams}) {
+        $self->_fail_connection(
+            $H3_DATAGRAM_ERROR,
+            'received QUIC DATAGRAM without local SETTINGS_H3_DATAGRAM',
+        );
+        return;
+    }
+
+    # A peer may send after it has sent its SETTINGS while the control-stream
+    # bytes are still racing this unreliable DATAGRAM. Dropping is safer than
+    # assigning semantics before the peer SETTINGS have been processed.
+    return unless $self->{peer_settings_received};
+
+    if (!$self->{peer_h3_datagram}) {
+        $self->_fail_connection(
+            $H3_DATAGRAM_ERROR,
+            'received QUIC DATAGRAM without peer SETTINGS_H3_DATAGRAM',
+        );
+        return;
+    }
+
+    my ($quarter, $prefix_length) = _decode_http3_varint($bytes, 0);
+
+    if (!defined $quarter) {
+        $self->_fail_connection(
+            $H3_DATAGRAM_ERROR,
+            'HTTP Datagram is missing a complete Quarter Stream ID',
+        );
+        return;
+    }
+
+    if (_decimal_less_than($HTTP3_MAX_QUARTER_STREAM_ID, $quarter)) {
+        $self->_fail_connection(
+            $H3_DATAGRAM_ERROR,
+            'HTTP Datagram Quarter Stream ID exceeds the RFC 9297 maximum',
+        );
+        return;
+    }
+
+    my $id = (0 + $quarter) << 2;
+    my $transaction = $self->{transactions}{$id};
+
+    # RFC 9297 permits silently dropping a DATAGRAM that races ahead of the
+    # request stream. The same treatment is appropriate after transaction
+    # cleanup, where the receive side is already gone.
+    return unless defined $transaction;
+
+    my $stream = $self->{streams}{$id};
+    return unless defined $stream;
+    return if $stream->remote_finished;
+    return if defined $stream->remote_reset_code;
+
+    if (!$transaction->datagrams_enabled) {
+        $self->_reject_datagram_stream(
+            $transaction,
+            'received HTTP Datagram for a request without datagram semantics',
+        );
+        return;
+    }
+
+    my $payload = substr($bytes, $prefix_length);
+    $transaction->_receive_datagram($payload);
+    return;
+}
+
 sub _capsule_protocol_error {
     my ($self, $transaction, $error) = @_;
 
@@ -1924,6 +2207,14 @@ sub start {
         return unless defined $weak;
         $weak->_service;
     });
+
+    if ($self->{quic}->can_receive_datagram) {
+        $self->{quic}->on_datagram(sub {
+            my ($quic, $bytes, $early_data) = @_;
+            return unless defined $weak;
+            $weak->_receive_quic_datagram($bytes, $early_data);
+        });
+    }
 
     $self->_service;
 
@@ -2366,6 +2657,7 @@ sub _drain_events {
         if ($type eq 'settings') {
             $self->{peer_max_field_section_size} = "$args[0]";
             $self->{peer_enable_connect_protocol} = $args[1] ? 1 : 0;
+            $self->{peer_h3_datagram} = $args[2] ? 1 : 0;
             $self->_accept_peer_extension_settings;
             next;
         }
@@ -2684,12 +2976,19 @@ sub _finish_headers {
             version => '3',
         );
 
+        my $datagrams = 0;
+        if (defined $self->{datagram_request}) {
+            $datagrams = $self->{datagram_request}->($self, $message) ? 1 : 0;
+        }
+
         my $transaction = Unblock::HTTP3::Transaction->_new(
             connection => $self,
             stream_id  => $id,
             request    => $message,
             response   => $response,
         );
+
+        $transaction->_enable_datagrams if $datagrams;
 
         my $request_receive_mode = $is_connect
             ? 'stream'

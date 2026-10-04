@@ -51,6 +51,9 @@ sub _new {
         response_receive_options => {},
         response_output_started  => 0,
         capsule_stream           => undef,
+        datagrams_enabled        => 0,
+        datagram_queue           => [],
+        datagram_callback        => undef,
         priority                 => $request->priority,
         state                    => 'active',
         error                   => undef,
@@ -152,6 +155,112 @@ sub capsules {
 
     $self->{capsule_stream} = $stream;
     return $stream;
+}
+
+sub _enable_datagrams {
+    my ($self) = @_;
+    $self->{datagrams_enabled} = 1;
+    return $self;
+}
+
+sub datagrams_enabled {
+    my ($self, @args) = @_;
+    croak 'datagrams_enabled() does not accept arguments' if @args;
+    return $self->{datagrams_enabled} ? 1 : 0;
+}
+
+sub send_datagram {
+    my ($self, $bytes) = @_;
+
+    croak 'send_datagram(): Transaction is already terminal'
+        if $self->is_terminal;
+    croak 'send_datagram(): HTTP Datagrams are not enabled for this Transaction'
+        unless $self->{datagrams_enabled};
+
+    my $connection = $self->{connection}
+        or croak 'send_datagram(): Transaction no longer has a connection';
+
+    return $connection->_send_transaction_datagram($self, $bytes);
+}
+
+sub max_datagram_payload_size {
+    my ($self, @args) = @_;
+    croak 'max_datagram_payload_size() does not accept arguments' if @args;
+    return 0 unless $self->{datagrams_enabled};
+
+    my $connection = $self->{connection};
+    return 0 unless defined $connection;
+
+    return $connection->_transaction_datagram_payload_size($self);
+}
+
+sub next_datagram {
+    my ($self, @args) = @_;
+    croak 'next_datagram() does not accept arguments' if @args;
+
+    my $bytes = shift @{ $self->{datagram_queue} };
+    return unless defined $bytes;
+
+    my $connection = $self->{connection};
+    $connection->_datagram_dequeued(length($bytes))
+        if defined $connection;
+
+    return $bytes;
+}
+
+sub on_datagram {
+    my ($self, $callback) = @_;
+
+    croak 'on_datagram() callback must be a code reference or undef'
+        if defined($callback) && ref($callback) ne 'CODE';
+
+    $self->{datagram_callback} = $callback;
+
+    if (defined $callback) {
+        while (defined(my $bytes = $self->next_datagram)) {
+            $callback->($self, $bytes);
+        }
+    }
+
+    return $self;
+}
+
+sub _enqueue_datagram {
+    my ($self, $bytes) = @_;
+    push @{ $self->{datagram_queue} }, $bytes;
+    return;
+}
+
+sub _receive_datagram {
+    my ($self, $bytes) = @_;
+
+    my $callback = $self->{datagram_callback};
+    if (defined $callback) {
+        $callback->($self, $bytes);
+        return;
+    }
+
+    my $connection = $self->{connection};
+    return unless defined $connection;
+
+    $connection->_buffer_transaction_datagram($self, $bytes);
+    return;
+}
+
+sub _discard_datagrams {
+    my ($self) = @_;
+
+    my $connection = $self->{connection};
+
+    if (defined $connection) {
+        for my $bytes (@{ $self->{datagram_queue} }) {
+            $connection->_datagram_dequeued(length($bytes));
+        }
+    }
+
+    $self->{datagram_queue} = [];
+    $self->{datagram_callback} = undef;
+    return;
 }
 
 sub state {
@@ -577,6 +686,7 @@ sub _mark_complete {
     return $self if $self->is_terminal;
 
     $self->_cancel_body_producers;
+    $self->_discard_datagrams;
     $self->{state} = 'complete';
 
     return $self;
@@ -587,6 +697,7 @@ sub _mark_cancelled {
     return $self if $self->is_terminal;
 
     $self->_cancel_body_producers;
+    $self->_discard_datagrams;
     $self->{state} = 'cancelled';
 
     return $self;
@@ -597,6 +708,7 @@ sub _mark_error {
     return $self if $self->is_terminal;
 
     $self->_cancel_body_producers;
+    $self->_discard_datagrams;
     $self->{state} = 'error';
     $self->{error} = defined($error) ? "$error" : 'HTTP/3 transaction failed';
 

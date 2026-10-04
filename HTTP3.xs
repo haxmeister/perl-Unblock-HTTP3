@@ -419,6 +419,7 @@ unblock_http3_recv_settings2_cb(
 
     av_push(event, newSVpv(max_field_section_size, 0));
     av_push(event, newSViv(settings->enable_connect_protocol ? 1 : 0));
+    av_push(event, newSViv(settings->h3_datagram ? 1 : 0));
     unblock_http3_push_event(native, event);
 
     return 0;
@@ -772,7 +773,8 @@ unblock_http3_new_conn(
     uint64_t max_field_section_size,
     uint64_t qpack_max_table_capacity,
     uint64_t qpack_blocked_streams,
-    int enable_connect_protocol
+    int enable_connect_protocol,
+    int h3_datagram
 )
 {
     unblock_http3_native_conn *native;
@@ -806,6 +808,7 @@ unblock_http3_new_conn(
     settings.qpack_max_dtable_capacity = qpack_max_table_capacity;
     settings.qpack_blocked_streams = qpack_blocked_streams;
     settings.enable_connect_protocol = enable_connect_protocol ? 1 : 0;
+    settings.h3_datagram = h3_datagram ? 1 : 0;
 
     if (is_server) {
         rv = nghttp3_conn_server_new(
@@ -959,11 +962,12 @@ _nghttp3_version()
         RETVAL
 
 SV *
-_new_client(max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, enable_connect_protocol)
+_new_client(max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, enable_connect_protocol, h3_datagram)
     UV max_field_section_size
     UV qpack_max_table_capacity
     UV qpack_blocked_streams
     IV enable_connect_protocol
+    IV h3_datagram
     CODE:
         if (
             (uint64_t)max_field_section_size > UNBLOCK_HTTP3_MAX_VARINT ||
@@ -978,17 +982,19 @@ _new_client(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
             (uint64_t)max_field_section_size,
             (uint64_t)qpack_max_table_capacity,
             (uint64_t)qpack_blocked_streams,
-            enable_connect_protocol ? 1 : 0
+            enable_connect_protocol ? 1 : 0,
+            h3_datagram ? 1 : 0
         );
     OUTPUT:
         RETVAL
 
 SV *
-_new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, enable_connect_protocol)
+_new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_streams, enable_connect_protocol, h3_datagram)
     UV max_field_section_size
     UV qpack_max_table_capacity
     UV qpack_blocked_streams
     IV enable_connect_protocol
+    IV h3_datagram
     CODE:
         if (
             (uint64_t)max_field_section_size > UNBLOCK_HTTP3_MAX_VARINT ||
@@ -1003,7 +1009,8 @@ _new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
             (uint64_t)max_field_section_size,
             (uint64_t)qpack_max_table_capacity,
             (uint64_t)qpack_blocked_streams,
-            enable_connect_protocol ? 1 : 0
+            enable_connect_protocol ? 1 : 0,
+            h3_datagram ? 1 : 0
         );
     OUTPUT:
         RETVAL
