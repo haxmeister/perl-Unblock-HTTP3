@@ -74,10 +74,12 @@ them as correctness tests.
 ## HTTP/3 layer microbenchmark
 
 The microbenchmark removes UDP, TLS, QUIC, and event driving from the timed
-loop. It reports three deliberately separate costs:
+loop. It reports the major HTTP-layer costs separately:
 
-- construction of a representative Uniform::HTTP::Request
-- preparation of HTTP/3 pseudo-header and normal wire fields
+- construction of a representative canonical Uniform::HTTP::Request
+- construction of its Uniform::HTTP::FastPath ABI view
+- legacy accessor-based wire-field preparation for comparison
+- current FastPath HTTP/3 pseudo-header and normal wire-field preparation
 - native libnghttp3 request submission and serialization
 
 Run it with:

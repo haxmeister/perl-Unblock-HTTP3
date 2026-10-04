@@ -3,6 +3,7 @@ use warnings;
 
 use Time::HiRes qw(time);
 
+use Uniform::HTTP::FastPath;
 use Uniform::HTTP::Request;
 use Unblock::HTTP3;
 use Unblock::HTTP3::Connection;
@@ -207,17 +208,39 @@ measure(
     },
 );
 measure(
-    'HTTP/3 wire field preparation',
+    'FastPath view construction',
     $iterations,
     sub {
+        $sink = Uniform::HTTP::FastPath::view($request);
+    },
+);
+
+measure(
+    'HTTP/3 FastPath field preparation',
+    $iterations,
+    sub {
+        my $view = Uniform::HTTP::FastPath::view($request);
+
         $sink = [
-            [ ':method',    $request->method ],
-            [ ':scheme',    $request->scheme ],
-            [ ':authority', $request->authority ],
-            [ ':path',      $request->target ],
+            [
+                ':method',
+                $view->[Uniform::HTTP::FastPath::SLOT_METHOD()],
+            ],
+            [
+                ':scheme',
+                $view->[Uniform::HTTP::FastPath::SLOT_SCHEME()],
+            ],
+            [
+                ':authority',
+                $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()],
+            ],
+            [
+                ':path',
+                $view->[Uniform::HTTP::FastPath::SLOT_TARGET()],
+            ],
             @{
                 Unblock::HTTP3::Connection::_wire_headers(
-                    $request,
+                    $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
                     'request',
                 )
             },
@@ -225,12 +248,30 @@ measure(
     },
 );
 
+my $prepared_view = Uniform::HTTP::FastPath::view($request);
 my $prepared_fields = [
-    [ ':method',    $request->method ],
-    [ ':scheme',    $request->scheme ],
-    [ ':authority', $request->authority ],
-    [ ':path',      $request->target ],
-    @{ Unblock::HTTP3::Connection::_wire_headers($request, 'request') },
+    [
+        ':method',
+        $prepared_view->[Uniform::HTTP::FastPath::SLOT_METHOD()],
+    ],
+    [
+        ':scheme',
+        $prepared_view->[Uniform::HTTP::FastPath::SLOT_SCHEME()],
+    ],
+    [
+        ':authority',
+        $prepared_view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()],
+    ],
+    [
+        ':path',
+        $prepared_view->[Uniform::HTTP::FastPath::SLOT_TARGET()],
+    ],
+    @{
+        Unblock::HTTP3::Connection::_wire_headers(
+            $prepared_view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
+            'request',
+        )
+    },
 ];
 
 measure(
