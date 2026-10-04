@@ -814,69 +814,10 @@ sub _valid_origin_serialization {
     return 1 if $value eq 'null';
 
     my $scheme = qr/[A-Za-z][A-Za-z0-9+.-]*/;
-    my $reg_name = qr/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}|[!\sub _normalize_origins {
-    my ($origins) = @_;
-
-    return undef unless defined $origins;
-
-    croak 'origins must be an array reference'
-        unless ref($origins) eq 'ARRAY';
-
-    my @normalized;
-
-    for my $origin (@$origins) {
-        croak 'each origin must be a defined scalar'
-            if !defined($origin) || ref($origin);
-
-        my $value = "$origin";
-
-        croak 'origins must use ASCII serialization'
-            if $value =~ /[^\x00-\x7f]/;
-        croak 'origins must not contain whitespace or control characters'
-            if $value =~ /[\x00-\x20\x7f]/;
-        croak 'origin exceeds the RFC 9412 16-bit length limit'
-            if length($value) > 65_535;
-        croak 'origin must be an RFC 6454 ASCII serialization'
-            unless $value eq 'null'
-                || $value =~ m{\A[A-Za-z][A-Za-z0-9+.-]*://[^/?#@]+\z};
-
-        push @normalized, $value;
-    }
-
-    return \@normalized;
-}'()*+,;=])+/;
+    my $reg_name =
+        qr/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}|[!\$&'()*+,;=])+/;
     my $ip_literal =
-        qr/\[(?:[0-9A-Fa-f:.]+|[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!\sub _normalize_origins {
-    my ($origins) = @_;
-
-    return undef unless defined $origins;
-
-    croak 'origins must be an array reference'
-        unless ref($origins) eq 'ARRAY';
-
-    my @normalized;
-
-    for my $origin (@$origins) {
-        croak 'each origin must be a defined scalar'
-            if !defined($origin) || ref($origin);
-
-        my $value = "$origin";
-
-        croak 'origins must use ASCII serialization'
-            if $value =~ /[^\x00-\x7f]/;
-        croak 'origins must not contain whitespace or control characters'
-            if $value =~ /[\x00-\x20\x7f]/;
-        croak 'origin exceeds the RFC 9412 16-bit length limit'
-            if length($value) > 65_535;
-        croak 'origin must be an RFC 6454 ASCII serialization'
-            unless $value eq 'null'
-                || $value =~ m{\A[A-Za-z][A-Za-z0-9+.-]*://[^/?#@]+\z};
-
-        push @normalized, $value;
-    }
-
-    return \@normalized;
-}'()*+,;=:-]+)\]/;
+        qr/\[(?:[0-9A-Fa-f:.]+|[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!\$&'()*+,;=:-]+)\]/;
 
     return $value =~ m{\A$scheme://(?:$ip_literal|$reg_name)(?::[0-9]+)?\z}
         ? 1
