@@ -317,35 +317,48 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Capsule::Stream - Capsule Protocol on an Extended CONNECT stream
+Unblock::HTTP3::Capsule::Stream - Capsule Protocol over Extended CONNECT
+
+=head1 SYNOPSIS
+
+    my $capsules = $tx->capsules;
+
+    $capsules->send(42, $bytes);
+
+    while (my $capsule = $capsules->next_capsule) {
+        ...
+    }
+
+    $capsules->complete;
 
 =head1 DESCRIPTION
 
-A Capsule stream wraps the existing HTTP/3 streaming body directions of one
-Extended CONNECT Transaction.
+A Capsule::Stream runs RFC 9297 Capsule framing over the streaming body
+directions of one Extended CONNECT Transaction.
 
-On a client, create the Capsule stream after receiving a successful final
-response. On a server, configure the successful Response before creating the
-Capsule stream.
+On a client, create it after receiving a successful final response. On a
+server, configure the successful Response before creating it.
 
-It does not define the semantics of any Capsule Type. Higher-level protocol
-modules choose which types they understand.
+The object handles Capsule framing and parsing. It does not define the meaning
+of Capsule Types.
 
 =head1 METHODS
 
 =head2 send
 
-    $capsules->send(42, $bytes);
+    my $can_continue = $capsules->send($type, $bytes);
 
-Sends one Capsule using the outgoing HTTP/3 data stream. The return value is
-the normal HTTP/3 body backpressure result.
+Sends one Capsule.
+
+The return value follows normal HTTP/3 body backpressure semantics. A false
+return means the bytes were accepted but the producer should pause.
 
 =head2 next_capsule
 
-Returns the next received Capsule in polling mode.
+Returns the next received L<Unblock::HTTP3::Capsule>, or undef.
 
-Polling pulls bytes from the underlying Body::Reader only as needed, so normal
-HTTP/3 receive-credit and buffering limits remain effective.
+Polling only consumes underlying body bytes as needed, so normal receive-credit
+and buffering limits remain active.
 
 =head2 complete
 
@@ -357,14 +370,26 @@ True after the peer cleanly ends its Capsule data stream.
 
 =head2 is_cancelled
 
-True if the underlying Transaction is cancelled.
+True if the underlying Transaction was cancelled.
 
-=head1 NEGOTIATION
+=head1 NOTES
 
-RFC 9297 allows an HTTP upgrade token to define Capsule Protocol use directly.
-It also defines the C<Capsule-Protocol> header field. Unblock::HTTP3 does not
-invent protocol-specific negotiation rules. The higher-level protocol is
-responsible for indicating Capsule Protocol use as required by its
-specification.
+Capsule Protocol negotiation belongs to the higher-level protocol.
+
+Unblock::HTTP3 provides the generic RFC 9297 mechanism but does not invent
+protocol-specific negotiation rules.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Transaction>, L<Unblock::HTTP3::Capsule>,
+L<Unblock::HTTP3::Capsule::Parser>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

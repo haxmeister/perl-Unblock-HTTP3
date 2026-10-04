@@ -161,27 +161,72 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Body::Stream - writable HTTP/3 body producer
+Unblock::HTTP3::Body::Stream - writable outgoing HTTP/3 body stream
 
-=head1 DESCRIPTION
+=head1 SYNOPSIS
 
-Applications obtain a Body::Stream from a L<Unblock::HTTP3::Transaction>.
+    my $body = $tx->response_body(
+        on_drain  => sub { ... },
+        on_cancel => sub { ... },
+    );
 
-Write bytes with:
-
-    my $can_continue = $body->write($bytes);
-
-A false return means the bytes were accepted, but production should pause until
-C<on_drain> runs.
-
-Finish with:
+    if (!$body->write($bytes)) {
+        # Pause production until on_drain runs.
+    }
 
     $body->complete;
 
-or:
+=head1 DESCRIPTION
 
+A Body::Stream sends an HTTP/3 request or response body incrementally.
+
+Body::Stream objects are created by L<Unblock::HTTP3::Transaction>. Applications
+do not construct them directly.
+
+C<write> uses bounded buffering. A false return means the bytes were accepted,
+but the producer should pause until C<on_drain> runs.
+
+C<on_cancel> runs if the Transaction ends before body production completes.
+
+=head1 METHODS
+
+=head2 write
+
+    my $can_continue = $body->write($bytes);
+
+Queues body bytes.
+
+Returns true when the producer may continue immediately. Returns false when the
+bytes were accepted but production should pause for backpressure.
+
+=head2 complete
+
+    $body->complete;
     $body->complete($final_bytes);
 
-C<on_cancel> runs if the transaction ends before body production completes.
+Finishes the outgoing body. Optional final bytes are queued before the clean
+end.
+
+Returns the Body::Stream.
+
+=head2 is_complete
+
+True after the producer has completed the body.
+
+=head2 is_cancelled
+
+True if the Transaction cancelled the body before normal completion.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Transaction>, L<Unblock::HTTP3::Body::Reader>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

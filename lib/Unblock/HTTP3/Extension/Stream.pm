@@ -380,17 +380,34 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Extension::Stream - one HTTP/3 extension unidirectional stream
+Unblock::HTTP3::Extension::Stream - HTTP/3 extension unidirectional stream
+
+=head1 SYNOPSIS
+
+    $h3->extension_stream_handler(
+        $type,
+        sub {
+            my ($h3, $stream) = @_;
+
+            while (defined(my $chunk = $stream->next_chunk)) {
+                ...
+            }
+        },
+    );
+
+    my $stream = $h3->open_extension_stream($type);
+    $stream->send($bytes);
+    $stream->finish;
 
 =head1 DESCRIPTION
 
-This object represents a generic HTTP/3 extension unidirectional stream.
+This object represents one generic HTTP/3 extension unidirectional stream.
 
 Unblock::HTTP3 owns the stream-type prefix. The extension owns the bytes after
 that prefix.
 
-Incoming streams can be polled with C<next_chunk> or configured with
-C<on_data>. Outgoing streams can use C<send>, C<send_some>, and C<finish>.
+Incoming streams can be polled with C<next_chunk> or configured with callbacks.
+Outgoing streams use C<send>, C<send_some>, and C<finish>.
 
 =head1 METHODS
 
@@ -404,13 +421,15 @@ Returns the underlying QUIC stream ID.
 
 =head2 incoming
 
-True for a stream created by the peer.
+True when the stream was opened by the peer.
 
 =head2 can_send
 
+True when this endpoint can send on the stream.
+
 =head2 can_receive
 
-Report the direction available to this endpoint.
+True when this endpoint can receive on the stream.
 
 =head2 configure
 
@@ -422,42 +441,42 @@ Report the direction available to this endpoint.
         on_drain => sub { ... },
     );
 
-Callbacks are optional.
+Configures optional callbacks and returns the Stream.
 
 =head2 next_chunk
 
-Returns the next received extension payload chunk in polling mode.
+Returns the next received payload chunk, or undef.
 
-Reading a chunk returns the corresponding QUIC receive credit.
+Consuming a chunk returns its QUIC receive credit.
 
 =head2 send
 
-Queues extension payload bytes for reliable delivery.
+Queues payload bytes for reliable delivery.
 
 =head2 send_some
 
-Uses the bounded Net::QUIC transmit path and returns the number of accepted
-payload bytes.
+Uses the bounded Net::QUIC transmit path and returns the number of payload bytes
+accepted.
 
-If fewer bytes are accepted, C<on_drain> runs when stream activity indicates
-that the producer can try again.
+If fewer bytes are accepted, C<on_drain> runs when the producer can try again.
 
 =head2 finish
 
-Cleanly closes the outgoing extension stream.
+Cleanly closes the outgoing stream.
 
 =head2 stop_sending
 
-Stops an incoming extension stream with an optional application error code.
+Stops an incoming stream with an optional application error code.
 
 =head2 reset
 
-Resets an outgoing extension stream with an optional application error code.
+Resets an outgoing stream with an optional application error code.
 
 =head2 acked_offset
 
-Returns the acknowledged payload offset. The HTTP/3 stream-type prefix is not
-included.
+Returns the acknowledged payload offset.
+
+The HTTP/3 stream-type prefix is not included.
 
 =head2 is_complete
 
@@ -465,14 +484,30 @@ True after a clean end in the available stream direction.
 
 =head2 is_reset
 
+True after the peer resets an incoming extension stream.
+
 =head2 reset_code
 
-Report peer reset state for an incoming extension stream.
+Returns the peer reset code, or undef.
 
 =head2 is_stopped
 
+True after the peer sends STOP_SENDING for an outgoing extension stream.
+
 =head2 stop_code
 
-Report peer STOP_SENDING state for an outgoing extension stream.
+Returns the peer STOP_SENDING code, or undef.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Connection>, L<Net::QUIC::Stream>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

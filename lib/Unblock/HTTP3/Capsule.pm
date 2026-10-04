@@ -135,20 +135,36 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Capsule - one HTTP Capsule Protocol value
+Unblock::HTTP3::Capsule - one RFC 9297 Capsule
 
-=head1 DESCRIPTION
-
-A Capsule is a type, length, and opaque value as defined by RFC 9297.
-
-=head1 METHODS
-
-=head2 new
+=head1 SYNOPSIS
 
     my $capsule = Unblock::HTTP3::Capsule->new(
         type  => 42,
         value => $bytes,
     );
+
+    my $wire = $capsule->encode;
+
+=head1 DESCRIPTION
+
+A Capsule is a numeric type and an opaque byte value as defined by RFC 9297.
+
+Unblock::HTTP3 does not assign application meaning to Capsule Types. Higher-level
+protocols decide which types they use.
+
+=head1 CONSTRUCTOR
+
+=head2 new
+
+    my $capsule = Unblock::HTTP3::Capsule->new(
+        type  => $type,
+        value => $bytes,
+    );
+
+Creates one Capsule.
+
+=head1 METHODS
 
 =head2 type
 
@@ -160,10 +176,24 @@ Returns the opaque Capsule Value bytes.
 
 =head2 length
 
-Returns the Capsule Value length.
+Returns the Capsule Value length in bytes.
 
 =head2 encode
 
-Returns the Capsule encoded for an HTTP data stream.
+Returns the complete wire encoding for an HTTP data stream.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Capsule::Parser>,
+L<Unblock::HTTP3::Capsule::Stream>,
+L<Unblock::HTTP3::Transaction>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

@@ -248,48 +248,84 @@ __END__
 
 Unblock::HTTP3::Capsule::Parser - incremental RFC 9297 Capsule parser
 
+=head1 SYNOPSIS
+
+    my $parser = Unblock::HTTP3::Capsule::Parser->new;
+
+    $parser->feed($bytes);
+
+    while (my $capsule = $parser->next_capsule) {
+        ...
+    }
+
+    $parser->finish;
+
 =head1 DESCRIPTION
 
 The parser accepts arbitrary chunks from an HTTP data stream. Capsule type,
-length, and value fields may be split across chunks.
+length, and value fields may be split across input chunks.
 
-With no callbacks, complete Capsules are queued for C<next_capsule>.
+With no callbacks, complete L<Unblock::HTTP3::Capsule> objects are queued for
+C<next_capsule>.
 
-C<handlers> can map Capsule Types to callbacks. In handler mode, unregistered
-types are silently skipped as required for unknown Capsule Types. An
-C<on_capsule> callback can be used as a catch-all.
+Handlers can be registered for specific Capsule Types. An C<on_capsule>
+callback can be used as a catch-all. Unknown unregistered types are skipped.
+GREASE Capsule Types are ignored and cannot be assigned application semantics.
 
-Capsule Types reserved by RFC 9297 for greasing are always ignored and cannot
-be registered as semantic handlers.
-
-=head1 METHODS
+=head1 CONSTRUCTOR
 
 =head2 new
 
 Useful options are:
 
-    handlers
-    on_capsule
-    max_capsule_size
+=over 4
 
-C<max_capsule_size> defaults to 4 MiB for Capsules whose values are retained.
-Unregistered Capsules can be skipped incrementally without buffering their
-values.
+=item C<handlers>
+
+Hash reference mapping Capsule Types to callbacks.
+
+=item C<on_capsule>
+
+Catch-all callback for complete Capsules.
+
+=item C<max_capsule_size>
+
+Maximum retained Capsule Value size. The default is 4 MiB.
+
+=back
+
+=head1 METHODS
 
 =head2 feed
 
 Adds bytes to the incremental parser.
 
+Returns the Parser.
+
 =head2 next_capsule
 
-Returns the next queued L<Unblock::HTTP3::Capsule> in polling mode.
+Returns the next queued L<Unblock::HTTP3::Capsule>, or undef.
 
 =head2 finish
 
-Marks the byte stream complete. A truncated final Capsule is rejected.
+Marks the input stream complete.
+
+A truncated final Capsule is rejected.
 
 =head2 is_finished
 
 True after a clean C<finish>.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Capsule>, L<Unblock::HTTP3::Capsule::Stream>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

@@ -260,24 +260,11 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Body::Reader - readable HTTP/3 body stream
+Unblock::HTTP3::Body::Reader - readable incoming HTTP/3 body stream
 
-=head1 DESCRIPTION
+=head1 SYNOPSIS
 
-A Reader provides streaming access to an incoming HTTP/3 body without
-buffering the complete body in the Request or Response object.
-
-Polling use:
-
-    while (defined(my $chunk = $body->next_chunk)) {
-        process($chunk);
-    }
-
-Calling C<next_chunk> returns QUIC receive credit for that chunk.
-
-Callback use:
-
-    my $body = $tx->request_body(
+    my $body = $tx->response_body(
         on_data => sub {
             my ($body, $chunk) = @_;
             process($chunk);
@@ -288,25 +275,54 @@ Callback use:
         },
     );
 
-Receive credit is returned after C<on_data> returns.
+Or poll it:
+
+    while (defined(my $chunk = $body->next_chunk)) {
+        process($chunk);
+    }
+
+=head1 DESCRIPTION
+
+A Body::Reader exposes an incoming HTTP/3 body without buffering the complete
+body in the Request or Response object.
+
+Consuming a chunk returns the corresponding QUIC receive credit. In callback
+mode, credit is returned after C<on_data> returns.
+
+Body::Reader objects are created by L<Unblock::HTTP3::Transaction>. Applications
+do not construct them directly.
 
 =head1 METHODS
 
 =head2 next_chunk
 
-Returns the next available body chunk, or undef if none is currently queued.
+Returns the next queued body chunk, or undef when no chunk is currently
+available.
 
 =head2 pending_bytes
 
-Returns the number of queued body bytes which have not yet been consumed by
-the application.
+Returns the number of queued body bytes not yet consumed by the application.
 
 =head2 is_complete
 
-True after the remote body has ended and all queued chunks have been consumed.
+True after the peer has ended the body and all queued chunks have been
+consumed.
 
 =head2 is_cancelled
 
-True if the transaction ended before the body reader completed.
+True if the Transaction ended before the body reader completed normally.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Transaction>, L<Unblock::HTTP3::Body::Stream>,
+L<Uniform::HTTP>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

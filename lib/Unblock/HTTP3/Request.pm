@@ -164,20 +164,81 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Request - HTTP/3 request message built on Uniform::HTTP
+Unblock::HTTP3::Request - Uniform HTTP request with HTTP/3 helpers
+
+=head1 SYNOPSIS
+
+    my $request = Unblock::HTTP3::Request->new(
+        method    => 'GET',
+        target    => '/',
+        scheme    => 'https',
+        authority => 'example.com',
+        priority  => {
+            urgency     => 1,
+            incremental => 0,
+        },
+    );
 
 =head1 DESCRIPTION
 
-C<Unblock::HTTP3::Request> is a thin subclass of L<Uniform::HTTP::Request>.
+C<Unblock::HTTP3::Request> is a thin subclass of
+L<Uniform::HTTP::Request>.
 
-Uniform::HTTP owns the common HTTP message semantics: method, target, scheme,
+Uniform::HTTP owns the common HTTP message data: method, target, scheme,
 authority, Extended CONNECT protocol metadata, headers, trailers, buffered
 body state, fidelity, mutability, and completeness.
 
-Unblock::HTTP3 adds RFC 9218 priority convenience methods and HTTP/3 abort
-diagnostics. Streaming and request-stream lifecycle remain on the Transaction.
+Unblock::HTTP3 adds RFC 9218 priority convenience methods and request-stream
+abort diagnostics.
 
 A plain L<Uniform::HTTP::Request> can also be submitted directly to
 L<Unblock::HTTP3::Connection>.
+
+=head1 CONSTRUCTOR
+
+=head2 new
+
+Accepts the normal L<Uniform::HTTP::Request> constructor arguments plus an
+optional C<priority> hash reference.
+
+=head1 METHODS
+
+=head2 priority
+
+    my $priority = $request->priority;
+
+    $request->priority(
+        urgency     => 1,
+        incremental => 1,
+    );
+
+Gets or sets the RFC 9218 Priority field.
+
+Urgency is 0 through 7. Incremental is 0 or 1.
+
+=head2 reset_code
+
+Returns the HTTP/3 reset code recorded for this Request, or undef.
+
+=head2 stop_sending_code
+
+Returns the HTTP/3 STOP_SENDING code recorded for this Request, or undef.
+
+=head2 is_aborted
+
+True when a reset or STOP_SENDING code has been recorded.
+
+=head1 SEE ALSO
+
+L<Uniform::HTTP::Request>, L<Unblock::HTTP3::Connection>,
+L<Unblock::HTTP3::Transaction>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut
