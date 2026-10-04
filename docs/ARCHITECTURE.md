@@ -284,7 +284,7 @@ Unblock::HTTP3 uses libnghttp3's RFC 9218 priority machinery.
 
 libnghttp3 also needs the cumulative number of client bidirectional streams
 permitted by QUIC so it can validate PRIORITY_UPDATE element IDs. Net::QUIC
-0.03 defaults that transport value to 100 and replenishes MAX_STREAMS as
+0.04 defaults that transport value to 100 and replenishes MAX_STREAMS as
 peer-created streams close.
 
 Unblock::HTTP3 mirrors that default into libnghttp3 and advances the native
