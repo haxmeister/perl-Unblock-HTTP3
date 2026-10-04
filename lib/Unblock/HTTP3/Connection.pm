@@ -1183,6 +1183,8 @@ sub _new {
         building          => {},
         transactions      => {},
         ready_transactions => [],
+        pending_early_transactions => [],
+        pending_early_datagrams    => {},
         ready_informational => [],
         output_finished   => {},
         response_sent     => {},
@@ -2402,6 +2404,30 @@ sub _receive_quic_datagram {
     return if $stream->remote_finished;
     return if defined $stream->remote_reset_code;
 
+    if (
+        $transaction->early_data
+        && $self->{role} eq 'server'
+        && !$self->{quic}->ready
+    ) {
+        my $payload = substr($bytes, $prefix_length);
+        my $length = length($payload);
+
+        if (
+            $self->{datagram_buffered_count}
+                >= $self->{max_buffered_datagrams}
+            || $self->{datagram_buffered_bytes} + $length
+                > $self->{max_buffered_datagram_bytes}
+        ) {
+            ++$self->{datagram_receive_drops};
+            return;
+        }
+
+        ++$self->{datagram_buffered_count};
+        $self->{datagram_buffered_bytes} += $length;
+        push @{ $self->{pending_early_datagrams}{$id} }, $payload;
+        return;
+    }
+
     if (!$transaction->datagrams_enabled) {
         $self->_reject_datagram_stream(
             $transaction,
@@ -2751,6 +2777,8 @@ sub _rollback_rejected_early_data {
 
     $self->{transactions} = {};
     $self->{ready_transactions} = [];
+    $self->{pending_early_transactions} = [];
+    $self->{pending_early_datagrams} = {};
     $self->{ready_informational} = [];
     $self->{streams} = {};
     $self->{messages} = {};
@@ -2792,6 +2820,93 @@ sub _rollback_rejected_early_data {
     return 1;
 }
 
+sub _discard_pending_early_datagrams {
+    my ($self, $id) = @_;
+
+    my $pending = delete $self->{pending_early_datagrams}{$id};
+    return unless defined $pending;
+
+    for my $bytes (@$pending) {
+        $self->_datagram_dequeued(length($bytes));
+    }
+
+    return;
+}
+
+sub _promote_accepted_early_transactions {
+    my ($self) = @_;
+
+    return unless $self->{role} eq 'server';
+    return unless $self->{quic}->ready;
+    return unless $self->{quic}->early_data_status eq 'accepted';
+    return unless @{ $self->{pending_early_transactions} };
+
+    my @pending =
+        splice @{ $self->{pending_early_transactions} };
+
+    for my $transaction (@pending) {
+        next if $transaction->is_terminal;
+
+        my $datagrams = 0;
+        if (defined $self->{datagram_request}) {
+            $datagrams =
+                $self->{datagram_request}->(
+                    $self,
+                    $transaction->request,
+                ) ? 1 : 0;
+        }
+
+        $transaction->_enable_datagrams if $datagrams;
+
+        my $id = $transaction->stream_id;
+        my $queued = delete $self->{pending_early_datagrams}{$id};
+
+        if (defined $queued && @$queued) {
+            if (!$datagrams) {
+                for my $bytes (@$queued) {
+                    $self->_datagram_dequeued(length($bytes));
+                }
+
+                $self->_reject_datagram_stream(
+                    $transaction,
+                    'received HTTP Datagram for a request without datagram semantics',
+                );
+                next;
+            }
+
+            for my $bytes (@$queued) {
+                $self->_datagram_dequeued(length($bytes));
+                $transaction->_receive_datagram($bytes);
+            }
+        }
+
+        push @{ $self->{ready_transactions} }, $transaction;
+    }
+
+    return 1;
+}
+
+sub _reject_pending_early_transactions {
+    my ($self) = @_;
+
+    return unless $self->{role} eq 'server';
+    return unless @{ $self->{pending_early_transactions} };
+
+    my @pending =
+        splice @{ $self->{pending_early_transactions} };
+
+    for my $transaction (@pending) {
+        my $id = $transaction->stream_id;
+        $self->_discard_pending_early_datagrams($id);
+
+        $transaction->_mark_error(
+            'QUIC rejected 0-RTT before HTTP request processing',
+        ) unless $transaction->is_terminal;
+    }
+
+    return 1;
+}
+
 sub _sync_early_data_status {
     my ($self) = @_;
 
@@ -2805,6 +2920,14 @@ sub _sync_early_data_status {
         && $status eq 'rejected'
     ) {
         return $self->_rollback_rejected_early_data;
+    }
+
+    if ($self->{role} eq 'server') {
+        if ($status eq 'rejected') {
+            $self->_reject_pending_early_transactions;
+        } elsif ($status eq 'accepted' && $self->{quic}->ready) {
+            $self->_promote_accepted_early_transactions;
+        }
     }
 
     return 0;
@@ -3782,11 +3905,6 @@ sub _finish_headers {
             version => '3',
         );
 
-        my $datagrams = 0;
-        if (defined $self->{datagram_request}) {
-            $datagrams = $self->{datagram_request}->($self, $message) ? 1 : 0;
-        }
-
         my $stream = $self->{streams}{$id};
         my $stream_is_early = defined($stream) && $stream->early_data ? 1 : 0;
 
@@ -3806,8 +3924,6 @@ sub _finish_headers {
             early_data => $stream_is_early,
         );
 
-        $transaction->_enable_datagrams if $datagrams;
-
         my $request_receive_mode = $is_connect
             ? 'stream'
             : $self->{receive_body_mode};
@@ -3822,7 +3938,21 @@ sub _finish_headers {
 
         $self->{transactions}{$id} = $transaction;
 
-        push @{ $self->{ready_transactions} }, $transaction;
+        if (
+            $stream_is_early
+            && !$self->{quic}->ready
+        ) {
+            push @{ $self->{pending_early_transactions} }, $transaction;
+        } else {
+            my $datagrams = 0;
+            if (defined $self->{datagram_request}) {
+                $datagrams =
+                    $self->{datagram_request}->($self, $message) ? 1 : 0;
+            }
+
+            $transaction->_enable_datagrams if $datagrams;
+            push @{ $self->{ready_transactions} }, $transaction;
+        }
     } else {
         croak 'HTTP/3 response is missing :status'
             unless defined $pseudo->{':status'};
