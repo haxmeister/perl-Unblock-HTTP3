@@ -24,6 +24,7 @@ It owns:
 - HTTP/3 stream lifecycle and errors
 - HTTP/3 resource limits
 - graceful HTTP/3 shutdown
+- remembered HTTP/3 SETTINGS and 0-RTT compatibility validation
 
 It does not own:
 
@@ -158,6 +159,40 @@ and transmit backpressure. Unblock::HTTP3 owns SETTINGS_H3_DATAGRAM, HTTP reques
 association, and H3_DATAGRAM_ERROR.
 
 Unblock::HTTP3 does not reach into Net::QUIC native structures.
+
+## 0-RTT and SETTINGS persistence
+
+QUIC/TLS early-data state remains owned by Net::QUIC. HTTP/3 SETTINGS state is
+kept separately because a client using 0-RTT must begin with the server
+settings remembered from the resumed session.
+
+The client saves:
+
+    Net::QUIC::Connection->early_data_state
+    Unblock::HTTP3::Connection->peer_settings_state
+
+and restores them to the matching layers on the returning connection.
+
+The server can export its advertised HTTP/3 state with
+`local_settings_state`. A server that permits early data supplies the matching
+opaque value as `remembered_local_settings` before it begins parsing 0-RTT
+request streams.
+
+Unblock::HTTP3 validates the new server SETTINGS after accepted early data.
+HTTP/3 limits cannot become less permissive in a way that could invalidate the
+early request. Previously non-default understood settings cannot silently
+disappear. SETTINGS_H3_DATAGRAM follows RFC 9297. A remembered nonzero
+SETTINGS_QPACK_MAX_TABLE_CAPACITY follows RFC 9204 and must be repeated exactly;
+a mismatch uses QPACK_DECODER_STREAM_ERROR.
+
+0-RTT request transmission is explicit with `early_data => 1`. This is a
+replay-safety boundary: Unblock::HTTP3 never resends an early request
+automatically.
+
+If QUIC rejects early data, the early Transaction is marked as an error. The
+early request, control, and QPACK streams are discarded, a fresh libnghttp3
+connection is created, new 1-RTT control and QPACK streams are bound, and the
+Connection remains usable for an application-selected retry.
 
 ## Bodies
 
@@ -424,9 +459,9 @@ The first release is focused on the core HTTP/3 engine.
 
 HTTP Datagrams and the current generic HTTP/3 extension surface are implemented.
 
-HTTP Datagram 0-RTT is intentionally deferred until Unblock::HTTP3 has a
-persistent HTTP/3 SETTINGS state format that can validate SETTINGS_H3_DATAGRAM
-across resumed connections.
+HTTP/3 0-RTT is implemented with separate opaque QUIC and HTTP/3 saved state.
+Accepted early data validates the new SETTINGS, and rejected early data rolls
+back HTTP/3 stream state before ordinary 1-RTT use continues.
 
 WebTransport and MASQUE applications are higher-level protocols, not missing
 Unblock::HTTP3 features. They can build on the generic HTTP/3 facilities provided
@@ -482,5 +517,12 @@ The real loopback suite currently proves:
 27. bodyless response semantics
 28. outgoing Content-Length validation
 29. completed stream and native-body cleanup
+30. persistent HTTP/3 peer SETTINGS state
+31. accepted 0-RTT request delivery
+32. 0-RTT HTTP Datagram routing
+33. rejected 0-RTT rollback and clean 1-RTT retry
+
+A separate public-network suite verifies multiplexed streaming requests against
+independent Cloudflare and LiteSpeed HTTP/3 servers.
 
 All dependency modules are installed from CPAN.
