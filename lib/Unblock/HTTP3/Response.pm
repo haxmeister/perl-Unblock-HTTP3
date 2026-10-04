@@ -3,7 +3,9 @@ package Unblock::HTTP3::Response;
 use strict;
 use warnings;
 use Carp qw(croak);
-use parent 'Unblock::HTTP3::_Message';
+
+use Uniform::HTTP::Response 0.04 ();
+use parent -norequire, 'Uniform::HTTP::Response';
 
 use Unblock::HTTP3 ();
 
@@ -11,76 +13,50 @@ our $VERSION = '0.01';
 
 sub new {
     my ($class, @args) = @_;
-    croak 'new() requires named arguments' if @args % 2;
 
-    my %args = @args;
-    my $status = exists $args{status} ? delete $args{status} : 200;
-
-    my $has_reason = exists $args{reason};
-    my $reason = delete $args{reason};
-
-    _validate_status($status);
-
-    if ($has_reason && defined $reason) {
-        $reason = _validate_reason($reason);
-    }
-
-    my $self = $class->_new_message(%args);
-    $self->{status} = 0 + $status;
-    $self->{reason} = $reason if $has_reason;
+    my $self = $class->SUPER::new(@args);
+    $self->{_http3_reset_code} = undef;
+    $self->{_http3_stop_sending_code} = undef;
 
     return $self;
 }
 
-sub status {
+sub reset_code {
     my ($self, @args) = @_;
-    return $self->{status} unless @args;
-
-    croak 'status() accepts at most one value' unless @args == 1;
-
-    $self->_assert_mutable;
-    _validate_status($args[0]);
-    $self->{status} = 0 + $args[0];
-
-    return $self;
+    croak 'reset_code() does not accept arguments' if @args;
+    return $self->{_http3_reset_code};
 }
 
-sub reason {
+sub stop_sending_code {
     my ($self, @args) = @_;
-    return $self->{reason} unless @args;
+    croak 'stop_sending_code() does not accept arguments' if @args;
+    return $self->{_http3_stop_sending_code};
+}
 
-    croak 'reason() accepts at most one value' unless @args == 1;
+sub is_aborted {
+    my ($self, @args) = @_;
+    croak 'is_aborted() does not accept arguments' if @args;
 
-    $self->_assert_mutable;
-    $self->{reason} = defined($args[0])
-        ? _validate_reason($args[0])
-        : undef;
+    return defined($self->{_http3_reset_code})
+        || defined($self->{_http3_stop_sending_code})
+        ? 1
+        : 0;
+}
 
+sub _mark_reset {
+    my ($self, $code) = @_;
+    $self->{_http3_reset_code} = 0 + $code;
+    $self->mark_incomplete;
+    $self->freeze;
     return $self;
 }
 
-sub _validate_status {
-    my ($status) = @_;
-
-    croak 'status must be an integer from 100 through 599'
-        unless defined($status)
-            && !ref($status)
-            && $status =~ /\A[0-9]+\z/
-            && $status >= 100
-            && $status <= 599;
-
-    return;
-}
-
-sub _validate_reason {
-    my ($reason) = @_;
-
-    my $bytes = Unblock::HTTP3::_Message::_byte_string('reason', $reason);
-
-    croak 'reason contains a prohibited control byte'
-        if $bytes =~ /[\x00-\x08\x0a-\x1f\x7f]/;
-
-    return $bytes;
+sub _mark_stop_sending {
+    my ($self, $code) = @_;
+    $self->{_http3_stop_sending_code} = 0 + $code;
+    $self->mark_incomplete;
+    $self->freeze;
+    return $self;
 }
 
 1;
@@ -89,14 +65,14 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Response - HTTP/3 response message
+Unblock::HTTP3::Response - HTTP/3 response message built on Uniform::HTTP
 
 =head1 DESCRIPTION
 
-Unblock::HTTP3::Response follows the Uniform::HTTP response message contract while
-remaining a Unblock::HTTP3 class suitable for live HTTP/3 protocol state.
+C<Unblock::HTTP3::Response> is a thin subclass of L<Uniform::HTTP::Response>.
 
-HTTP/3 does not carry a reason phrase on the wire. C<reason> is retained only
-for the common message contract and cross-version adaptation.
+Uniform::HTTP owns status, reason, version, headers, trailers, buffered body
+state, fidelity, mutability, and completeness. Unblock::HTTP3 only adds HTTP/3
+abort diagnostics associated with a live request stream.
 
 =cut

@@ -3,7 +3,9 @@ package Unblock::HTTP3::Request;
 use strict;
 use warnings;
 use Carp qw(croak);
-use parent 'Unblock::HTTP3::_Message';
+
+use Uniform::HTTP::Request 0.04 ();
+use parent -norequire, 'Uniform::HTTP::Request';
 
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::_Native ();
@@ -12,9 +14,7 @@ our $VERSION = '0.01';
 
 sub _priority_from_args {
     my ($current, @args) = @_;
-
-    croak 'priority() requires named arguments'
-        if @args % 2;
+    croak 'priority() requires named arguments' if @args % 2;
 
     my %priority = (
         urgency     => 3,
@@ -50,10 +50,8 @@ sub _priority_from_args {
 
 sub _priority_field {
     my ($priority) = @_;
-
     my $value = 'u=' . $priority->{urgency};
     $value .= ', i' if $priority->{incremental};
-
     return $value;
 }
 
@@ -85,122 +83,18 @@ sub new {
     croak 'new() requires named arguments' if @args % 2;
 
     my %args = @args;
-
-    croak 'method is required' unless exists $args{method};
-    croak 'target is required' unless exists $args{target};
-
-    my $method = delete $args{method};
-    my $target = delete $args{target};
-
-    my $has_scheme = exists $args{scheme};
-    my $scheme = delete $args{scheme};
-
-    my $has_authority = exists $args{authority};
-    my $authority = delete $args{authority};
-
-    my $has_protocol = exists $args{protocol};
-    my $protocol = delete $args{protocol};
-
-    my $priority = exists $args{priority}
-        ? delete $args{priority}
-        : undef;
+    my $priority = delete $args{priority};
 
     croak 'priority must be a hash reference'
         if defined($priority) && ref($priority) ne 'HASH';
 
-    $method = Unblock::HTTP3::_Message::_byte_string('method', $method);
-    croak 'method must be an HTTP token'
-        unless $method =~ /\A[!\#\$%&'*+\-.\^_\x60|~0-9A-Za-z]+\z/;
-
-    $target = Unblock::HTTP3::_Message::_byte_string('target', $target);
-    croak 'target must not be empty' unless length $target;
-    croak 'target must not contain spaces or control bytes'
-        if $target =~ /[\x00-\x20\x7f]/;
-
-    if ($has_scheme && defined $scheme) {
-        $scheme = Unblock::HTTP3::_Message::_byte_string('scheme', $scheme);
-        croak 'invalid request scheme'
-            unless $scheme =~ /\A[A-Za-z][A-Za-z0-9+.-]*\z/;
-    }
-
-    if ($has_authority && defined $authority) {
-        $authority = Unblock::HTTP3::_Message::_byte_string(
-            'authority',
-            $authority,
-        );
-
-        croak 'invalid request authority'
-            if $authority eq '' || $authority =~ /[\x00-\x20\x7f\/?#]/;
-    }
-
-    if ($has_protocol && defined $protocol) {
-        $protocol = Unblock::HTTP3::_Message::_byte_string(
-            'protocol',
-            $protocol,
-        );
-
-        croak 'protocol must be an HTTP token'
-            unless $protocol =~ /\A[!\#\$%&'*+\-.\^_\x60|~0-9A-Za-z]+\z/;
-        croak 'protocol is only valid with CONNECT'
-            unless $method eq 'CONNECT';
-    }
-
-    my $self = $class->_new_message(%args);
-    $self->{method} = $method;
-    $self->{target} = $target;
-    $self->{scheme} = $scheme if $has_scheme;
-    $self->{authority} = $authority if $has_authority;
-    $self->{protocol} = $protocol if $has_protocol;
+    my $self = $class->SUPER::new(%args);
+    $self->{_http3_reset_code} = undef;
+    $self->{_http3_stop_sending_code} = undef;
 
     $self->priority(%$priority)
         if defined $priority;
 
-    return $self;
-}
-
-sub method {
-    my ($self, @args) = @_;
-    return $self->{method} unless @args;
-
-    croak 'method() accepts at most one value' unless @args == 1;
-
-    $self->_assert_mutable;
-
-    my $method = Unblock::HTTP3::_Message::_byte_string('method', $args[0]);
-    croak 'method must be an HTTP token'
-        unless $method =~ /\A[!\#\$%&'*+\-.\^_\x60|~0-9A-Za-z]+\z/;
-    croak 'method cannot change away from CONNECT while protocol is set'
-        if $method ne 'CONNECT' && defined $self->{protocol};
-
-    $self->{method} = $method;
-    return $self;
-}
-
-sub protocol {
-    my ($self, @args) = @_;
-    return $self->{protocol} unless @args;
-
-    croak 'protocol() accepts at most one value' unless @args == 1;
-
-    $self->_assert_mutable;
-
-    if (!defined $args[0]) {
-        $self->{protocol} = undef;
-        return $self;
-    }
-
-    croak 'protocol is only valid with CONNECT'
-        unless $self->{method} eq 'CONNECT';
-
-    my $protocol = Unblock::HTTP3::_Message::_byte_string(
-        'protocol',
-        $args[0],
-    );
-
-    croak 'protocol must be an HTTP token'
-        unless $protocol =~ /\A[!\#\$%&'*+\-.\^_\x60|~0-9A-Za-z]+\z/;
-
-    $self->{protocol} = $protocol;
     return $self;
 }
 
@@ -212,8 +106,6 @@ sub priority {
     );
 
     return $current unless @args;
-
-    $self->_assert_mutable;
 
     my $priority = _priority_from_args(
         $current,
@@ -228,72 +120,41 @@ sub priority {
     return $self;
 }
 
-sub target {
+sub reset_code {
     my ($self, @args) = @_;
-    return $self->{target} unless @args;
+    croak 'reset_code() does not accept arguments' if @args;
+    return $self->{_http3_reset_code};
+}
 
-    croak 'target() accepts at most one value' unless @args == 1;
+sub stop_sending_code {
+    my ($self, @args) = @_;
+    croak 'stop_sending_code() does not accept arguments' if @args;
+    return $self->{_http3_stop_sending_code};
+}
 
-    $self->_assert_mutable;
+sub is_aborted {
+    my ($self, @args) = @_;
+    croak 'is_aborted() does not accept arguments' if @args;
 
-    my $target = Unblock::HTTP3::_Message::_byte_string('target', $args[0]);
-    croak 'target must not be empty' unless length $target;
-    croak 'target must not contain spaces or control bytes'
-        if $target =~ /[\x00-\x20\x7f]/;
+    return defined($self->{_http3_reset_code})
+        || defined($self->{_http3_stop_sending_code})
+        ? 1
+        : 0;
+}
 
-    $self->{target} = $target;
+sub _mark_reset {
+    my ($self, $code) = @_;
+    $self->{_http3_reset_code} = 0 + $code;
+    $self->mark_incomplete;
+    $self->freeze;
     return $self;
 }
 
-sub target_is_exact {
-    my ($self, @args) = @_;
-    croak 'target_is_exact() does not accept arguments' if @args;
-    return 1;
-}
-
-sub scheme {
-    my ($self, @args) = @_;
-    return $self->{scheme} unless @args;
-
-    croak 'scheme() accepts at most one value' unless @args == 1;
-
-    $self->_assert_mutable;
-
-    if (!defined $args[0]) {
-        $self->{scheme} = undef;
-        return $self;
-    }
-
-    my $scheme = Unblock::HTTP3::_Message::_byte_string('scheme', $args[0]);
-    croak 'invalid request scheme'
-        unless $scheme =~ /\A[A-Za-z][A-Za-z0-9+.-]*\z/;
-
-    $self->{scheme} = $scheme;
-    return $self;
-}
-
-sub authority {
-    my ($self, @args) = @_;
-    return $self->{authority} unless @args;
-
-    croak 'authority() accepts at most one value' unless @args == 1;
-
-    $self->_assert_mutable;
-
-    if (!defined $args[0]) {
-        $self->{authority} = undef;
-        return $self;
-    }
-
-    my $authority = Unblock::HTTP3::_Message::_byte_string(
-        'authority',
-        $args[0],
-    );
-
-    croak 'invalid request authority'
-        if $authority eq '' || $authority =~ /[\x00-\x20\x7f\/?#]/;
-
-    $self->{authority} = $authority;
+sub _mark_stop_sending {
+    my ($self, $code) = @_;
+    $self->{_http3_stop_sending_code} = 0 + $code;
+    $self->mark_incomplete;
+    $self->freeze;
     return $self;
 }
 
@@ -303,15 +164,20 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Request - HTTP/3 request message
+Unblock::HTTP3::Request - HTTP/3 request message built on Uniform::HTTP
 
 =head1 DESCRIPTION
 
-Unblock::HTTP3::Request follows the Uniform::HTTP request message contract while
-remaining a Unblock::HTTP3 class suitable for live HTTP/3 protocol state.
+C<Unblock::HTTP3::Request> is a thin subclass of L<Uniform::HTTP::Request>.
 
-HTTP/3 scheme and authority pseudo-fields are available through C<scheme> and
-C<authority>. Extended CONNECT requests also expose the C<:protocol>
-pseudo-header through C<protocol>.
+Uniform::HTTP owns the common HTTP message semantics: method, target, scheme,
+authority, Extended CONNECT protocol metadata, headers, trailers, buffered
+body state, fidelity, mutability, and completeness.
+
+Unblock::HTTP3 adds RFC 9218 priority convenience methods and HTTP/3 abort
+diagnostics. Streaming and request-stream lifecycle remain on the Transaction.
+
+A plain L<Uniform::HTTP::Request> can also be submitted directly to
+L<Unblock::HTTP3::Connection>.
 
 =cut

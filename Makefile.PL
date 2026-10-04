@@ -50,6 +50,7 @@ WriteMakefile(
         'Net::QUIC'      => '0.04',
         'Scalar::Util'    => 0,
         'Time::HiRes'     => 0,
+        'Uniform::HTTP'    => '0.04',
         'XSLoader'        => 0,
         'parent'          => 0,
     },
@@ -61,7 +62,6 @@ WriteMakefile(
         'IO::Socket::INET' => 0,
         'Socket'           => 0,
         'Test2::V0'        => 0,
-        'Uniform::HTTP'    => '0.02',
     },
 
     INC  => $cflags,

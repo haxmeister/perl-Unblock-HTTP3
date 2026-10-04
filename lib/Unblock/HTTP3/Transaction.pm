@@ -6,6 +6,7 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
+use Uniform::HTTP::Request 0.04 ();
 use Unblock::HTTP3 ();
 
 our $VERSION = '0.01';
@@ -19,6 +20,7 @@ sub _new {
     my $stream_id  = delete $args{stream_id};
     my $request    = delete $args{request};
     my $response   = delete $args{response};
+    my $request_streaming = delete $args{request_streaming} ? 1 : 0;
 
     croak 'Transaction requires a Unblock::HTTP3::Connection'
         unless blessed($connection)
@@ -27,9 +29,9 @@ sub _new {
         unless defined($stream_id)
             && !ref($stream_id)
             && $stream_id =~ /\A[0-9]+\z/;
-    croak 'Transaction requires a Unblock::HTTP3::Request'
+    croak 'Transaction requires a Uniform::HTTP::Request'
         unless blessed($request)
-            && $request->isa('Unblock::HTTP3::Request');
+            && $request->isa('Uniform::HTTP::Request');
     croak 'Transaction response must be a Unblock::HTTP3::Response'
         if defined($response)
             && (!blessed($response)
@@ -49,12 +51,20 @@ sub _new {
         response_receive_mode    => 'buffered',
         request_receive_options  => {},
         response_receive_options => {},
+        request_streaming         => $request_streaming,
+        response_streaming        => 0,
+        request_buffered_body     => '',
+        request_buffered_seen     => 0,
+        response_buffered_body    => '',
+        response_buffered_seen    => 0,
         response_output_started  => 0,
         capsule_stream           => undef,
         datagrams_enabled        => 0,
         datagram_queue           => [],
         datagram_callback        => undef,
-        priority                 => $request->priority,
+        priority                 => Unblock::HTTP3::Request::_parse_priority_field(
+            $request->header('priority'),
+        ),
         state                    => 'active',
         error                   => undef,
     }, $class;
@@ -314,8 +324,7 @@ sub send_informational {
             && $response->status <= 199
             && $response->status != 101;
     croak 'send_informational(): informational responses cannot have a body'
-        if $response->has_buffered_body
-            || $response->_has_incremental_body;
+        if $response->has_buffered_body;
     croak 'send_informational(): informational responses cannot have trailers'
         if $response->has_trailers;
 
@@ -383,10 +392,8 @@ sub request_body {
         return $body;
     }
 
-    my $request = $self->{request};
-
     croak 'request_body(): Request is not configured for incremental body production'
-        unless $request->_has_incremental_body;
+        unless $self->{request_streaming};
     croak 'request_body options must be key/value pairs'
         if @args % 2;
 
@@ -463,7 +470,8 @@ sub response_body {
         'response_body()',
     );
 
-    $response->_begin_stream_body;
+    $self->{response_streaming} = 1;
+    $response->mark_incomplete;
 
     require Unblock::HTTP3::Body::Stream;
 
@@ -490,7 +498,7 @@ sub send_response {
         or croak 'send_response(): Transaction has no Response';
 
     croak 'send_response(): Response has an incremental body; use response_body()'
-        if $response->_has_incremental_body;
+        if $self->{response_streaming};
 
     $connection->_send_transaction_response($self);
     return $self;
@@ -622,8 +630,83 @@ sub _write_body {
 
     die $error unless $ok;
 
-    $message->_mark_complete if $final;
+    $message->mark_complete if $final;
     return $can_continue;
+}
+
+sub _request_is_streaming {
+    my ($self) = @_;
+    return $self->{request_streaming} ? 1 : 0;
+}
+
+sub _response_is_streaming {
+    my ($self) = @_;
+    return $self->{response_streaming} ? 1 : 0;
+}
+
+sub _enable_response_streaming {
+    my ($self) = @_;
+    $self->{response_streaming} = 1;
+    $self->{response}->mark_incomplete if defined $self->{response};
+    return $self;
+}
+
+sub _buffered_body_bytes {
+    my ($self, $kind) = @_;
+    croak "unsupported buffered body kind '$kind'"
+        if $kind ne 'request' && $kind ne 'response';
+
+    return $self->{ $kind . '_buffered_seen' }
+        ? length($self->{ $kind . '_buffered_body' })
+        : 0;
+}
+
+sub _append_buffered_body {
+    my ($self, $kind, $bytes) = @_;
+    croak "unsupported buffered body kind '$kind'"
+        if $kind ne 'request' && $kind ne 'response';
+
+    $self->{ $kind . '_buffered_seen' } = 1;
+    $self->{ $kind . '_buffered_body' } .= $bytes;
+    return;
+}
+
+sub _finish_received_message {
+    my ($self, $kind) = @_;
+    croak "unsupported received message kind '$kind'"
+        if $kind ne 'request' && $kind ne 'response';
+
+    my $message = $kind eq 'request'
+        ? $self->{request}
+        : $self->{response};
+
+    return unless defined $message;
+
+    if (
+        $self->{ $kind . '_receive_mode' } eq 'buffered'
+        && $self->{ $kind . '_buffered_seen' }
+    ) {
+        $message->body($self->{ $kind . '_buffered_body' });
+    }
+
+    $self->{ $kind . '_buffered_body' } = '';
+    $self->{ $kind . '_buffered_seen' } = 0;
+
+    $message->freeze_trailers;
+    $message->freeze;
+    $message->mark_complete;
+    return;
+}
+
+sub _discard_received_body_buffers {
+    my ($self) = @_;
+
+    for my $kind (qw(request response)) {
+        $self->{ $kind . '_buffered_body' } = '';
+        $self->{ $kind . '_buffered_seen' } = 0;
+    }
+
+    return;
 }
 
 sub _request_body_object {
@@ -688,6 +771,7 @@ sub _mark_complete {
 
     $self->_cancel_body_producers;
     $self->_discard_datagrams;
+    $self->_discard_received_body_buffers;
     $self->{state} = 'complete';
 
     return $self;
@@ -699,6 +783,7 @@ sub _mark_cancelled {
 
     $self->_cancel_body_producers;
     $self->_discard_datagrams;
+    $self->_discard_received_body_buffers;
     $self->{state} = 'cancelled';
 
     return $self;
@@ -710,6 +795,7 @@ sub _mark_error {
 
     $self->_cancel_body_producers;
     $self->_discard_datagrams;
+    $self->_discard_received_body_buffers;
     $self->{state} = 'error';
     $self->{error} = defined($error) ? "$error" : 'HTTP/3 transaction failed';
 
