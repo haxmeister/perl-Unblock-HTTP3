@@ -1669,7 +1669,7 @@ sub next_transaction {
     my ($self, @args) = @_;
 
     croak 'next_transaction() does not accept arguments' if @args;
-    $self->_sync_early_data_status if $self->{started};
+    $self->_service if $self->{started} && !$self->{failed};
     return shift @{ $self->{ready_transactions} };
 }
 
@@ -1677,6 +1677,7 @@ sub next_informational {
     my ($self, @args) = @_;
 
     croak 'next_informational() does not accept arguments' if @args;
+    $self->_service if $self->{started} && !$self->{failed};
     return shift @{ $self->{ready_informational} };
 }
 
