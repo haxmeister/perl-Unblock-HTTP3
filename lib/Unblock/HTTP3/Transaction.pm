@@ -58,11 +58,11 @@ sub _new {
         early_data                => $early_data,
         response_streaming        => 0,
         request_buffered_body     => '',
-        request_buffered_tail     => '',
+        request_buffered_chunks   => [],
         request_buffered_bytes    => 0,
         request_buffered_seen     => 0,
         response_buffered_body    => '',
-        response_buffered_tail    => '',
+        response_buffered_chunks  => [],
         response_buffered_bytes   => 0,
         response_buffered_seen    => 0,
         response_output_started  => 0,
@@ -672,11 +672,8 @@ sub _buffered_body_bytes {
 
     return 0 unless $self->{ $kind . '_buffered_seen' };
 
-    my $body = $self->{ $kind . '_buffered_body' };
-
-    return ref($body) eq 'ARRAY'
-        ? $self->{ $kind . '_buffered_bytes' }
-        : length($body);
+    return $self->{ $kind . '_buffered_bytes' }
+        + length($self->{ $kind . '_buffered_body' });
 }
 
 sub _append_buffered_body {
@@ -689,51 +686,25 @@ sub _append_buffered_body {
     my $length = length($bytes);
     return unless $length;
 
-    my $body_name = $kind . '_buffered_body';
-
-    if (
-        ref($self->{$body_name}) ne 'ARRAY'
-        && $length < $BUFFERED_BODY_RETAIN_BYTES
-    ) {
-        $self->{$body_name} .= $bytes;
+    if ($length < $BUFFERED_BODY_RETAIN_BYTES) {
+        $self->{ $kind . '_buffered_body' } .= $bytes;
         return;
     }
 
-    my $tail_name = $kind . '_buffered_tail';
+    my $body_name = $kind . '_buffered_body';
+    my $chunks = $self->{ $kind . '_buffered_chunks' };
     my $bytes_name = $kind . '_buffered_bytes';
 
-    if (ref($self->{$body_name}) ne 'ARRAY') {
-        my $buffered = $self->{$body_name};
-        my @chunks;
+    if (length($self->{$body_name})) {
+        my $tail = $self->{$body_name};
 
-        push @chunks, $buffered if length($buffered);
-        push @chunks, $bytes;
-
-        $self->{$body_name} = \@chunks;
-        $self->{$bytes_name} = length($buffered) + $length;
-        return;
+        push @$chunks, $tail;
+        $self->{$bytes_name} += length($tail);
+        $self->{$body_name} = '';
     }
 
-    my $chunks = $self->{$body_name};
+    push @$chunks, $bytes;
     $self->{$bytes_name} += $length;
-
-    if ($length >= $BUFFERED_BODY_RETAIN_BYTES) {
-        if (length($self->{$tail_name})) {
-            push @$chunks, $self->{$tail_name};
-            $self->{$tail_name} = '';
-        }
-
-        push @$chunks, $bytes;
-        return;
-    }
-
-    $self->{$tail_name} .= $bytes;
-
-    if (length($self->{$tail_name}) >= $BUFFERED_BODY_RETAIN_BYTES) {
-        push @$chunks, $self->{$tail_name};
-        $self->{$tail_name} = '';
-    }
-
     return;
 }
 
@@ -753,31 +724,29 @@ sub _finish_received_message {
         && $self->{ $kind . '_buffered_seen' }
     ) {
         my $body_name = $kind . '_buffered_body';
-        my $tail_name = $kind . '_buffered_tail';
-        my $stored = $self->{$body_name};
+        my $chunks = $self->{ $kind . '_buffered_chunks' };
         my $body;
 
-        if (ref($stored) eq 'ARRAY') {
-            if (length($self->{$tail_name})) {
-                push @$stored, $self->{$tail_name};
-            }
+        if (@$chunks) {
+            push @$chunks, $self->{$body_name}
+                if length($self->{$body_name});
 
-            $body = @$stored == 1
-                ? $stored->[0]
-                : join('', @$stored);
+            $body = @$chunks == 1
+                ? $chunks->[0]
+                : join('', @$chunks);
         } else {
-            $body = $stored;
+            $body = $self->{$body_name};
         }
 
         $self->{$body_name} = '';
-        $self->{$tail_name} = '';
+        $self->{ $kind . '_buffered_chunks' } = [];
         $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
 
         $message->body($body);
     } else {
         $self->{ $kind . '_buffered_body' } = '';
-        $self->{ $kind . '_buffered_tail' } = '';
+        $self->{ $kind . '_buffered_chunks' } = [];
         $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
     }
@@ -793,7 +762,7 @@ sub _discard_received_body_buffers {
 
     for my $kind (qw(request response)) {
         $self->{ $kind . '_buffered_body' } = '';
-        $self->{ $kind . '_buffered_tail' } = '';
+        $self->{ $kind . '_buffered_chunks' } = [];
         $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
     }
