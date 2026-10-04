@@ -36,3 +36,4 @@ t/13-zero-rtt.t
 t/14-origin.t
 t/15-receive-body-ownership.t
 t/16-rfc-wire-errors.t
+t/17-critical-stream-lifecycle.t
