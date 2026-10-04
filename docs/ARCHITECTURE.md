@@ -82,9 +82,9 @@ Uniform owns:
 - header and trailer fidelity
 - section mutability and whole-message completeness
 
-Unblock::HTTP3 adds only protocol-engine concerns. Its Request convenience
-subclass adds RFC 9218 priority helpers and stream-abort diagnostics. Its
-Response convenience subclass adds stream-abort diagnostics.
+Unblock::HTTP3 adds only protocol-engine concerns. HTTP/3 priority, reset,
+STOP_SENDING, completion, body-stream, Datagram, and Capsule state belongs to
+`Unblock::HTTP3::Transaction`, not to the canonical Uniform message objects.
 
 ## Transactions
 
@@ -192,10 +192,11 @@ automatically.
 
 On the server, Unblock::HTTP3 may parse early HTTP/3 streams while the handshake
 is pending, but it does not publish those Transactions to application code
-until QUIC reports the early data accepted and the handshake is complete. A
-configured `datagram_request` callback is also deferred until that point.
+until the QUIC handshake is complete and the early data has not been rejected.
+A configured `datagram_request` callback is also deferred until that point.
 HTTP Datagrams that arrive with an early Transaction are retained only within
-the normal bounded Datagram limits and are delivered after acceptance. This
+the normal bounded Datagram limits and are delivered after the replay-safety
+gate opens. This
 implements the RFC 8470 safe default without requiring every application to
 reimplement anti-replay gating.
 
@@ -260,14 +261,21 @@ For Extended CONNECT:
 - the Transaction exposes the protocol identifier
 - Unblock::HTTP3 does not assign application semantics to the identifier
 
-A malformed received request is rejected as a stream error using
-H3_MESSAGE_ERROR. The HTTP/3 connection and unrelated multiplexed requests
-remain alive.
+Malformed request semantics detected by Unblock::HTTP3 are rejected on the
+affected request stream with H3_MESSAGE_ERROR, leaving unrelated multiplexed
+requests alive.
+
+Some malformed HTTP cases are detected inside libnghttp3 before Unblock::HTTP3
+can apply stream-local handling. The libnghttp3 read API documents those errors
+as connection-fatal. See `docs/RFC-COMPLIANCE.md` for that native-library
+limitation.
 
 ## Content-Length
 
 libnghttp3 validates received Content-Length values and checks them against the
-sum of received DATA frame lengths.
+sum of received DATA frame lengths. A Content-Length failure detected inside
+libnghttp3 is subject to the native malformed-message scope limitation described
+in `docs/RFC-COMPLIANCE.md`.
 
 Unblock::HTTP3 validates the outgoing side before bytes are submitted:
 
@@ -453,8 +461,10 @@ code that should close QUIC.
 After a fatal libnghttp3 read error, Unblock::HTTP3 stops calling into that native
 HTTP/3 connection and closes the underlying Net::QUIC connection.
 
-Malformed received messages, including Content-Length mismatches, are handled
-by libnghttp3 using HTTP/3 message errors.
+Malformed HTTP semantics rejected by Unblock::HTTP3 use H3_MESSAGE_ERROR at
+request-stream scope when possible. Malformed cases detected internally by
+libnghttp3 can require connection closure because its read API declares further
+use of the native connection undefined after a negative return.
 
 ## Resource limits
 
@@ -488,7 +498,7 @@ shutdown.
 
 ## Scope
 
-The first release is focused on the core HTTP/3 engine.
+The current release is focused on the core HTTP/3 engine.
 
 HTTP Datagrams and the current generic HTTP/3 extension surface are implemented.
 
@@ -551,8 +561,8 @@ The real loopback suite currently proves:
 28. outgoing Content-Length validation
 29. completed stream and native-body cleanup
 30. persistent HTTP/3 peer SETTINGS state
-31. accepted 0-RTT request delivery
-32. 0-RTT HTTP Datagram routing
+31. replay-gated accepted 0-RTT request delivery
+32. replay-gated 0-RTT HTTP Datagram routing
 33. rejected 0-RTT rollback and clean 1-RTT retry
 
 A separate public-network suite verifies multiplexed streaming requests against
