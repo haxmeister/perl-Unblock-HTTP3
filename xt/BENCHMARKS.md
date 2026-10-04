@@ -8,6 +8,7 @@ The benchmark suite currently contains:
     xt/benchmark-loopback.pl
     xt/benchmark-process-loopback.pl
     xt/benchmark-http3-micro.pl
+    xt/benchmark-body-micro.pl
 
 Both measure complete HTTP/3 requests over real loopback UDP, TLS, and QUIC.
 Both endpoints use Unblock::HTTP3, while Net::QUIC provides the transport.
@@ -94,3 +95,29 @@ Environment variables:
 This benchmark is intended to show where per-request CPU time is spent before
 we optimize. It is not a replacement for the real UDP/TLS/QUIC loopback
 benchmarks.
+
+
+## Streaming body-copy microbenchmark
+
+The body benchmark isolates the outgoing streaming body retain/serialize/ACK
+cycle without UDP or QUIC packet processing.
+
+For each chunk size it compares:
+
+- Unblock::HTTP3::_Bytes::byte_string
+- native incremental-body append, nghttp3 serialization, write-offset advance,
+  simulated ACK offset, and retained-buffer release
+
+Run it with:
+
+    perl -Iblib/lib -Iblib/arch xt/benchmark-body-micro.pl
+
+Environment variables:
+
+    UNBLOCK_HTTP3_BODY_BENCH_BYTES=33554432
+    UNBLOCK_HTTP3_BODY_BENCH_MAX_ITERATIONS=50000
+    UNBLOCK_HTTP3_BODY_BENCH_SIZES=64,1024,16384,65536,262144
+
+The benchmark verifies native streaming retained bytes return to zero after the
+simulated ACKs. Its purpose is to decide whether body copying is expensive
+enough to justify a more complex retained-buffer design.

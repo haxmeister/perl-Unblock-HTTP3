@@ -7,6 +7,7 @@ on:
       - "xt/benchmark-loopback.pl"
       - "xt/benchmark-process-loopback.pl"
       - "xt/benchmark-http3-micro.pl"
+      - "xt/benchmark-body-micro.pl"
       - "xt/BENCHMARKS.md"
       - ".github/workflows/benchmark.yml"
 
@@ -67,6 +68,16 @@ jobs:
           perl -Iblib/lib -Iblib/arch xt/benchmark-http3-micro.pl 2>&1 \
             | tee "$RUNNER_TEMP/http3-micro-benchmark.txt"
 
+      - name: Run streaming body-copy microbenchmark
+        env:
+          UNBLOCK_HTTP3_BODY_BENCH_BYTES: "33554432"
+          UNBLOCK_HTTP3_BODY_BENCH_MAX_ITERATIONS: "50000"
+          UNBLOCK_HTTP3_BODY_BENCH_SIZES: "64,1024,16384,65536,262144"
+        run: |
+          set -o pipefail
+          perl -Iblib/lib -Iblib/arch xt/benchmark-body-micro.pl 2>&1 \
+            | tee "$RUNNER_TEMP/http3-body-benchmark.txt"
+
       - name: Store benchmark output
         if: always()
         uses: actions/upload-artifact@v4
@@ -76,3 +87,4 @@ jobs:
             ${{ runner.temp }}/http3-benchmark.txt
             ${{ runner.temp }}/http3-process-benchmark.txt
             ${{ runner.temp }}/http3-micro-benchmark.txt
+            ${{ runner.temp }}/http3-body-benchmark.txt
