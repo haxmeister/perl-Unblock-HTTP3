@@ -190,6 +190,15 @@ a mismatch uses QPACK_DECODER_STREAM_ERROR.
 replay-safety boundary: Unblock::HTTP3 never resends an early request
 automatically.
 
+On the server, Unblock::HTTP3 may parse early HTTP/3 streams while the handshake
+is pending, but it does not publish those Transactions to application code
+until QUIC reports the early data accepted and the handshake is complete. A
+configured `datagram_request` callback is also deferred until that point.
+HTTP Datagrams that arrive with an early Transaction are retained only within
+the normal bounded Datagram limits and are delivered after acceptance. This
+implements the RFC 8470 safe default without requiring every application to
+reimplement anti-replay gating.
+
 If QUIC rejects early data, the early Transaction is marked as an error. The
 early request, control, and QPACK streams are discarded, a fresh libnghttp3
 connection is created, new 1-RTT control and QPACK streams are bound, and the
