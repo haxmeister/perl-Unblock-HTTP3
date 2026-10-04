@@ -22,6 +22,17 @@ my $endpoint = Net::QUIC::Endpoint->client(
 my $quic = $endpoint->connection;
 isa_ok($quic, ['Net::QUIC::Connection']);
 
+like(
+    dies {
+        Unblock::HTTP3::Connection->client(
+            quic                  => $quic,
+            enable_http_datagrams => 1,
+        );
+    },
+    qr/requires QUIC DATAGRAM receive support/,
+    'HTTP/3 cannot advertise DATAGRAM without QUIC DATAGRAM transport',
+);
+
 my $http3 = Unblock::HTTP3::Connection->client(
     quic => $quic,
 );

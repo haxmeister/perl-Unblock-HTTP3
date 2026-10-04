@@ -132,6 +132,20 @@ is(scalar(@$settings), 1,
 ok($settings->[0] >= 0,
     'valid peer control input reports consumed bytes');
 
+my $bad_datagram_settings = Unblock::HTTP3::_Native->server;
+
+my $invalid_datagram_setting = $bad_datagram_settings->read_stream(
+    2,
+    "\x00\x04\x02\x33\x02",
+    0,
+    2,
+);
+
+is(scalar(@$invalid_datagram_setting), 4,
+    'invalid SETTINGS_H3_DATAGRAM returns native error details');
+is($invalid_datagram_setting->[2], 0x0109,
+    'SETTINGS_H3_DATAGRAM value above one maps to H3_SETTINGS_ERROR');
+
 my $fatal = $parser->read_stream(
     0,
     "\x04\x00",
