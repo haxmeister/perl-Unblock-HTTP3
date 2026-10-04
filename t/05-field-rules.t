@@ -4,8 +4,29 @@ use warnings;
 use Test2::V0;
 
 use Unblock::HTTP3::Connection;
-use Unblock::HTTP3::Request;
-use Unblock::HTTP3::Response;
+use Uniform::HTTP::FastPath;
+use Uniform::HTTP::Request;
+use Uniform::HTTP::Response;
+
+
+sub wire_headers {
+    my ($message, $context) = @_;
+    my $view = Uniform::HTTP::FastPath::view($message);
+
+    return Unblock::HTTP3::Connection::_wire_headers(
+        $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
+        $context,
+    );
+}
+
+sub wire_trailers {
+    my ($message) = @_;
+    my $view = Uniform::HTTP::FastPath::view($message);
+
+    return Unblock::HTTP3::Connection::_wire_trailers(
+        $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()],
+    );
+}
 
 for my $name (
     'Connection',
@@ -14,7 +35,7 @@ for my $name (
     'Transfer-Encoding',
     'Upgrade',
 ) {
-    my $request = Unblock::HTTP3::Request->new(
+    my $request = Uniform::HTTP::Request->new(
         method  => 'GET',
         target  => '/',
         headers => [ [ $name, 'test' ] ],
@@ -22,7 +43,7 @@ for my $name (
 
     like(
         dies {
-            Unblock::HTTP3::Connection::_wire_headers(
+            wire_headers(
                 $request,
                 'request',
             );
@@ -32,14 +53,14 @@ for my $name (
     );
 }
 
-my $good_te = Unblock::HTTP3::Request->new(
+my $good_te = Uniform::HTTP::Request->new(
     method  => 'GET',
     target  => '/',
     headers => [ [ 'TE', 'trailers' ] ],
 );
 
 is(
-    Unblock::HTTP3::Connection::_wire_headers(
+    wire_headers(
         $good_te,
         'request',
     ),
@@ -47,7 +68,7 @@ is(
     'request TE trailers is allowed and field name is lowercased',
 );
 
-my $bad_te = Unblock::HTTP3::Request->new(
+my $bad_te = Uniform::HTTP::Request->new(
     method  => 'GET',
     target  => '/',
     headers => [ [ 'TE', 'gzip' ] ],
@@ -55,7 +76,7 @@ my $bad_te = Unblock::HTTP3::Request->new(
 
 like(
     dies {
-        Unblock::HTTP3::Connection::_wire_headers(
+        wire_headers(
             $bad_te,
             'request',
         );
@@ -64,14 +85,14 @@ like(
     'request TE with another value is rejected',
 );
 
-my $response_te = Unblock::HTTP3::Response->new(
+my $response_te = Uniform::HTTP::Response->new(
     status  => 200,
     headers => [ [ 'TE', 'trailers' ] ],
 );
 
 like(
     dies {
-        Unblock::HTTP3::Connection::_wire_headers(
+        wire_headers(
             $response_te,
             'response',
         );
@@ -80,14 +101,14 @@ like(
     'response TE is rejected',
 );
 
-my $trailer_te = Unblock::HTTP3::Response->new(
+my $trailer_te = Uniform::HTTP::Response->new(
     status   => 200,
     trailers => [ [ 'TE', 'trailers' ] ],
 );
 
 like(
     dies {
-        Unblock::HTTP3::Connection::_wire_trailers(
+        wire_trailers(
             $trailer_te,
         );
     },
@@ -96,14 +117,14 @@ like(
 );
 
 for my $name ('Content-Length', 'Host') {
-    my $message = Unblock::HTTP3::Response->new(
+    my $message = Uniform::HTTP::Response->new(
         status   => 200,
         trailers => [ [ $name, '1' ] ],
     );
 
     like(
         dies {
-            Unblock::HTTP3::Connection::_wire_trailers(
+            wire_trailers(
                 $message,
             );
         },
@@ -112,7 +133,7 @@ for my $name ('Content-Length', 'Host') {
     );
 }
 
-my $ordinary = Unblock::HTTP3::Response->new(
+my $ordinary = Uniform::HTTP::Response->new(
     status  => 200,
     headers => [
         [ 'Content-Type', 'text/plain' ],
@@ -121,7 +142,7 @@ my $ordinary = Unblock::HTTP3::Response->new(
 );
 
 is(
-    Unblock::HTTP3::Connection::_wire_headers(
+    wire_headers(
         $ordinary,
         'response',
     ),
@@ -132,7 +153,7 @@ is(
     'ordinary HTTP/3 field names are encoded lowercase',
 );
 
-my $neutral_version = Unblock::HTTP3::Request->new(
+my $neutral_version = Uniform::HTTP::Request->new(
     method => 'GET',
     target => '/',
 );
@@ -146,7 +167,7 @@ is(
     'HTTP/3 accepts an unspecified Uniform message version',
 );
 
-my $http3_version = Unblock::HTTP3::Request->new(
+my $http3_version = Uniform::HTTP::Request->new(
     method  => 'GET',
     target  => '/',
     version => '3',
@@ -161,7 +182,7 @@ is(
     'HTTP/3 accepts an explicit version 3',
 );
 
-my $wrong_version = Unblock::HTTP3::Request->new(
+my $wrong_version = Uniform::HTTP::Request->new(
     method  => 'GET',
     target  => '/',
     version => '2',
@@ -178,7 +199,7 @@ like(
     'HTTP/3 rejects an explicitly incompatible Uniform version',
 );
 
-my $extended_request = Unblock::HTTP3::Request->new(
+my $extended_request = Uniform::HTTP::Request->new(
     method    => 'CONNECT',
     protocol  => 'test-protocol',
     scheme    => 'https',
@@ -191,7 +212,7 @@ is($extended_request->protocol, 'test-protocol',
 
 like(
     dies {
-        Unblock::HTTP3::Request->new(
+        Uniform::HTTP::Request->new(
             method    => 'CONNECT',
             protocol  => 'bad protocol',
             scheme    => 'https',
@@ -203,7 +224,7 @@ like(
     'Extended CONNECT protocol must be an HTTP token',
 );
 
-my $neutral_protocol_request = Unblock::HTTP3::Request->new(
+my $neutral_protocol_request = Uniform::HTTP::Request->new(
     method   => 'GET',
     protocol => 'test-protocol',
     target   => '/',

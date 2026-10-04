@@ -1,6 +1,14 @@
 Revision history for Unblock-HTTP3
 
 0.02  Not yet released
+    - Require Uniform::HTTP 0.05 and use exact canonical Uniform::HTTP::Request
+      and Uniform::HTTP::Response objects throughout the public HTTP message API.
+    - Remove the Unblock::HTTP3 Request and Response subclasses; HTTP/3
+      priority and stream-abort state now belong to Transaction.
+    - Use Uniform::HTTP::FastPath ABI 1 for outgoing wire-field access and
+      trusted construction of already-validated received HTTP/3 messages.
+    - Record local and remote RESET_STREAM and STOP_SENDING codes explicitly
+      on Transaction without adding transport state to Uniform message objects.
     - Add RFC 9412 ORIGIN support through libnghttp3.
     - Add server origins configuration and client peer_origins inspection.
     - Add independent quic-go client interoperability against an

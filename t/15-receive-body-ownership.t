@@ -5,7 +5,7 @@ use Test2::V0;
 
 use Unblock::HTTP3::_Native;
 use Unblock::HTTP3::Transaction;
-use Unblock::HTTP3::Response;
+use Uniform::HTTP::Response;
 use Unblock::HTTP3::Body::Reader;
 
 {
@@ -63,7 +63,7 @@ sub terminal_transaction {
     }, 'Unblock::HTTP3::Transaction';
 }
 
-my $response = Unblock::HTTP3::Response->new(status => 200);
+my $response = Uniform::HTTP::Response->new(status => 200);
 my $buffered = buffered_transaction($response);
 
 my $first = 'first-';
@@ -108,7 +108,7 @@ is(
     'buffered receive releases retained chunk storage after finalization',
 );
 
-my $large_response = Unblock::HTTP3::Response->new(status => 200);
+my $large_response = Uniform::HTTP::Response->new(status => 200);
 my $large = buffered_transaction($large_response);
 my $large_first = 'A' x 16_384;
 my $large_second = 'B' x 65_536;
@@ -144,7 +144,7 @@ is(
     'large retained chunk storage is released after finalization',
 );
 
-my $single_response = Unblock::HTTP3::Response->new(status => 200);
+my $single_response = Uniform::HTTP::Response->new(status => 200);
 my $single = buffered_transaction($single_response);
 my $single_chunk = 'single-owned-chunk';
 
@@ -158,7 +158,7 @@ is(
     'single buffered chunk keeps stable lifetime through finalization',
 );
 
-my $empty_response = Unblock::HTTP3::Response->new(status => 200);
+my $empty_response = Uniform::HTTP::Response->new(status => 200);
 my $empty = buffered_transaction($empty_response);
 
 $empty->_append_buffered_body('response', '');

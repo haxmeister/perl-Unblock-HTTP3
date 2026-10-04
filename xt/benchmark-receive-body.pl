@@ -6,7 +6,7 @@ use Time::HiRes qw(time);
 use Unblock::HTTP3;
 use Unblock::HTTP3::_Native;
 use Unblock::HTTP3::Transaction;
-use Unblock::HTTP3::Response;
+use Uniform::HTTP::Response;
 use Unblock::HTTP3::Body::Reader;
 
 my $target_bytes =
@@ -81,7 +81,7 @@ sub measure_buffered_cycle {
     my ($size, $iterations, $body) = @_;
 
     my $response =
-        Unblock::HTTP3::Response->new(status => 200);
+        Uniform::HTTP::Response->new(status => 200);
 
     my $transaction = bless {
         response                 => $response,
@@ -391,7 +391,7 @@ for my $size (@sizes) {
         $iterations,
         sub {
             my $response =
-                Unblock::HTTP3::Response->new(status => 200);
+                Uniform::HTTP::Response->new(status => 200);
 
             my $transaction = bless {
                 response                 => $response,

@@ -65,13 +65,9 @@ One HTTP/3 connection over one Net::QUIC connection.
 
 One HTTP/3 request stream and its response.
 
-=item L<Unblock::HTTP3::Request>
+=item L<Uniform::HTTP::Request> and L<Uniform::HTTP::Response>
 
-Optional thin subclass of L<Uniform::HTTP::Request> with HTTP/3 helpers.
-
-=item L<Unblock::HTTP3::Response>
-
-Optional thin subclass of L<Uniform::HTTP::Response> with HTTP/3 diagnostics.
+Canonical HTTP message objects used directly by Unblock::HTTP3.
 
 =item L<Unblock::HTTP3::Body::Stream>
 

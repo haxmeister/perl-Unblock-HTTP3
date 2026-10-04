@@ -50,7 +50,7 @@ WriteMakefile(
         'Net::QUIC'      => '0.04',
         'Scalar::Util'    => 0,
         'Time::HiRes'     => 0,
-        'Uniform::HTTP'    => '0.04',
+        'Uniform::HTTP'    => '0.05',
         'XSLoader'        => 0,
         'parent'          => 0,
     },
@@ -108,14 +108,6 @@ WriteMakefile(
             'Unblock::HTTP3::Connection' => {
                 file    => 'lib/Unblock/HTTP3/Connection.pm',
                 version => MM->parse_version('lib/Unblock/HTTP3/Connection.pm'),
-            },
-            'Unblock::HTTP3::Request' => {
-                file    => 'lib/Unblock/HTTP3/Request.pm',
-                version => MM->parse_version('lib/Unblock/HTTP3/Request.pm'),
-            },
-            'Unblock::HTTP3::Response' => {
-                file    => 'lib/Unblock/HTTP3/Response.pm',
-                version => MM->parse_version('lib/Unblock/HTTP3/Response.pm'),
             },
             'Unblock::HTTP3::Transaction' => {
                 file    => 'lib/Unblock/HTTP3/Transaction.pm',

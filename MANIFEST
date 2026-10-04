@@ -14,8 +14,6 @@ lib/Unblock/HTTP3/Capsule/Parser.pm
 lib/Unblock/HTTP3/Capsule/Stream.pm
 lib/Unblock/HTTP3/Connection.pm
 lib/Unblock/HTTP3/Extension/Stream.pm
-lib/Unblock/HTTP3/Request.pm
-lib/Unblock/HTTP3/Response.pm
 lib/Unblock/HTTP3/Transaction.pm
 lib/Unblock/HTTP3/_Bytes.pm
 lib/Unblock/HTTP3/_Native.pm

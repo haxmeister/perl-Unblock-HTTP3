@@ -3,14 +3,14 @@ package Unblock::HTTP3::Connection;
 use strict;
 use warnings;
 use Carp qw(croak);
-use Uniform::HTTP::Request 0.04 ();
+use Uniform::HTTP::FastPath 0.05 ();
+use Uniform::HTTP::Request 0.05 ();
+use Uniform::HTTP::Response 0.05 ();
 use Scalar::Util qw(blessed weaken);
 use Time::HiRes ();
 
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::_Native ();
-use Unblock::HTTP3::Request ();
-use Unblock::HTTP3::Response ();
 use Unblock::HTTP3::Transaction ();
 use Net::QUIC::Connection ();
 
@@ -1498,9 +1498,8 @@ sub request {
 
     croak 'request() is only available on a client HTTP/3 connection'
         unless $self->{role} eq 'client';
-    croak 'request() requires a Uniform::HTTP::Request object'
-        unless blessed($request)
-            && $request->isa('Uniform::HTTP::Request');
+    croak 'request() requires a canonical Uniform::HTTP::Request'
+        unless ref($request) eq 'Uniform::HTTP::Request';
 
     _assert_http3_version($request, 'request()');
 
@@ -1841,9 +1840,16 @@ sub _send_informational_response {
         'send_informational()',
     );
 
+    my $view = Uniform::HTTP::FastPath::view($response);
     my @fields = (
-        [ ':status', "" . $response->status ],
-        @{ _wire_headers($response, 'response') },
+        [
+            ':status',
+            "" . $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
+        ],
+        @{ _wire_headers(
+            $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
+            'response',
+        ) },
     );
 
     $self->_assert_peer_field_section_size(
@@ -2114,23 +2120,17 @@ sub _cancel_transaction {
         if ($stream->can_receive && !$stream->remote_finished) {
             $self->{native}->shutdown_stream_read($id);
             $stream->stop_sending($H3_REQUEST_CANCELLED);
+            $transaction->_mark_local_stop_sending($H3_REQUEST_CANCELLED);
         }
 
         if ($stream->can_send && !defined($stream->local_reset_code)) {
             $self->{native}->shutdown_stream_write($id);
             $stream->reset($H3_REQUEST_CANCELLED);
+            $transaction->_mark_local_reset($H3_REQUEST_CANCELLED);
         }
     }
 
     $self->{native}->discard_body($id);
-
-    $transaction->request->_mark_stop_sending($H3_REQUEST_CANCELLED)
-        if $self->{role} eq 'client'
-            && $transaction->request->can('_mark_stop_sending');
-
-    my $response = $transaction->response;
-    $response->_mark_reset($H3_REQUEST_CANCELLED)
-        if defined($response) && $response->can('_mark_reset');
 
     $transaction->_mark_cancelled;
     return $transaction;
@@ -2176,7 +2176,7 @@ sub _set_transaction_priority {
     my $stream_id = $transaction->stream_id;
 
     if ($self->{role} eq 'client') {
-        my $field = Unblock::HTTP3::Request::_priority_field(
+        my $field = Unblock::HTTP3::Transaction::_priority_field(
             $priority,
         );
 
@@ -2298,11 +2298,13 @@ sub _reject_datagram_stream {
         if ($stream->can_receive && !$stream->remote_finished) {
             $self->{native}->shutdown_stream_read($id);
             $stream->stop_sending($H3_DATAGRAM_ERROR);
+            $transaction->_mark_local_stop_sending($H3_DATAGRAM_ERROR);
         }
 
         if ($stream->can_send && !$self->{output_finished}{$id}) {
             $self->{native}->shutdown_stream_write($id);
             $stream->reset($H3_DATAGRAM_ERROR);
+            $transaction->_mark_local_reset($H3_DATAGRAM_ERROR);
         }
     }
 
@@ -2430,16 +2432,21 @@ sub _reject_message_stream {
     $self->{rejected_streams}{$id} = "$reason";
 
     my $stream = $self->{streams}{$id};
+    my $transaction = $self->{transactions}{$id};
 
     if (defined $stream) {
         if ($stream->can_receive && !$stream->remote_finished) {
             $self->{native}->shutdown_stream_read($id);
             $stream->stop_sending($H3_MESSAGE_ERROR);
+            $transaction->_mark_local_stop_sending($H3_MESSAGE_ERROR)
+                if defined $transaction;
         }
 
         if ($stream->can_send && !defined($stream->local_reset_code)) {
             $self->{native}->shutdown_stream_write($id);
             $stream->reset($H3_MESSAGE_ERROR);
+            $transaction->_mark_local_reset($H3_MESSAGE_ERROR)
+                if defined $transaction;
         }
     }
 
@@ -2507,7 +2514,6 @@ sub _maybe_complete_transaction {
         my $response = $transaction->response;
         return unless defined $response;
         return unless $response->is_complete;
-        return if $response->can('is_aborted') && $response->is_aborted;
 
         my $reader = $transaction->_incoming_body_reader('response');
         return if defined($reader) && !$reader->is_complete;
@@ -2524,17 +2530,11 @@ sub _maybe_complete_transaction {
 
     my $request = $transaction->request;
     return unless $request->is_complete;
-    return if $request->can('is_aborted') && $request->is_aborted;
 
     my $reader = $transaction->_incoming_body_reader('request');
     return if defined($reader) && !$reader->is_complete;
 
     return unless $self->{output_finished}{$id};
-
-    my $response = $transaction->response;
-    return if defined($response)
-        && $response->can('is_aborted')
-        && $response->is_aborted;
 
     $transaction->_mark_complete;
     $self->_cleanup_stream_if_done($id);
@@ -3190,13 +3190,12 @@ sub _service_stream {
 
         $self->{native}->shutdown_stream_read($id);
 
-        my $message = $self->{messages}{$id};
-        $message->_mark_reset($remote_reset)
-            if defined($message) && $message->can('_mark_reset');
-
         my $transaction = $self->{transactions}{$id};
-        $transaction->_mark_cancelled
-            if defined($transaction) && !$transaction->is_terminal;
+        if (defined $transaction) {
+            $transaction->_mark_remote_reset($remote_reset);
+            $transaction->_mark_cancelled
+                unless $transaction->is_terminal;
+        }
     }
 
     my $remote_stop = $stream->remote_stop_sending_code;
@@ -3207,13 +3206,12 @@ sub _service_stream {
         $self->{native}->shutdown_stream_write($id);
         $self->{native}->discard_body($id);
 
-        my $message = $self->{outgoing}{$id};
-        $message->_mark_stop_sending($remote_stop)
-            if defined($message) && $message->can('_mark_stop_sending');
-
         my $transaction = $self->{transactions}{$id};
-        $transaction->_mark_cancelled
-            if defined($transaction) && !$transaction->is_terminal;
+        if (defined $transaction) {
+            $transaction->_mark_remote_stop_sending($remote_stop);
+            $transaction->_mark_cancelled
+                unless $transaction->is_terminal;
+        }
     }
 
     if ($stream->closed && !$lifecycle->{closed_seen}) {
@@ -3409,15 +3407,23 @@ sub _drain_events {
 
         if ($type eq 'stop_sending') {
             my $stream = $self->{streams}{$id};
-            $stream->stop_sending($args[0])
-                if defined($stream) && $stream->can_receive;
+            if (defined($stream) && $stream->can_receive) {
+                $stream->stop_sending($args[0]);
+                my $transaction = $self->{transactions}{$id};
+                $transaction->_mark_local_stop_sending($args[0])
+                    if defined $transaction;
+            }
             next;
         }
 
         if ($type eq 'reset_stream') {
             my $stream = $self->{streams}{$id};
-            $stream->reset($args[0])
-                if defined($stream) && $stream->can_send;
+            if (defined($stream) && $stream->can_send) {
+                $stream->reset($args[0]);
+                my $transaction = $self->{transactions}{$id};
+                $transaction->_mark_local_reset($args[0])
+                    if defined $transaction;
+            }
             next;
         }
 
@@ -3474,6 +3480,73 @@ sub _drain_events {
     }
 
     return;
+}
+
+sub _received_message_flags {
+    my ($kind, $fin) = @_;
+
+    my $flags =
+        Uniform::HTTP::FastPath::FLAG_HEADERS_LOSSLESS()
+        | Uniform::HTTP::FastPath::FLAG_TRAILERS_LOSSLESS();
+
+    $flags |= Uniform::HTTP::FastPath::FLAG_TARGET_EXACT()
+        if $kind eq 'request';
+
+    if ($fin) {
+        $flags |= Uniform::HTTP::FastPath::FLAG_COMPLETE();
+    } else {
+        $flags |= Uniform::HTTP::FastPath::FLAG_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_BODY_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_TRAILERS_MUTABLE();
+    }
+
+    return $flags;
+}
+
+sub _received_request {
+    my ($args, $fin) = @_;
+
+    my $view = [
+        Uniform::HTTP::FastPath::ABI_VERSION(),
+        Uniform::HTTP::FastPath::KIND_REQUEST(),
+        _received_message_flags('request', $fin),
+        '3',
+        $args->{method},
+        $args->{target},
+        $args->{scheme},
+        $args->{authority},
+        $args->{protocol},
+        undef,
+        undef,
+        $args->{headers},
+        [],
+        undef,
+    ];
+
+    return Uniform::HTTP::FastPath::request_from_validated($view);
+}
+
+sub _received_response {
+    my ($status, $headers, $fin) = @_;
+
+    my $view = [
+        Uniform::HTTP::FastPath::ABI_VERSION(),
+        Uniform::HTTP::FastPath::KIND_RESPONSE(),
+        _received_message_flags('response', $fin),
+        '3',
+        undef,
+        undef,
+        undef,
+        undef,
+        undef,
+        $status,
+        undef,
+        $headers,
+        [],
+        undef,
+    ];
+
+    return Uniform::HTTP::FastPath::response_from_validated($view);
 }
 
 sub _finish_headers {
@@ -3580,15 +3653,9 @@ sub _finish_headers {
             }
         }
 
-        $message = Unblock::HTTP3::Request->new(%args);
-        if ($fin) {
-            $message->freeze;
-        } else {
-            $message->mark_incomplete;
-            $message->freeze_initial;
-        }
+        $message = _received_request(\%args, $fin);
 
-        my $response = Unblock::HTTP3::Response->new(
+        my $response = Uniform::HTTP::Response->new(
             status  => 200,
             version => '3',
         );
@@ -3638,18 +3705,11 @@ sub _finish_headers {
         croak 'HTTP/3 response is missing :status'
             unless defined $pseudo->{':status'};
 
-        $message = Unblock::HTTP3::Response->new(
-            status  => $pseudo->{':status'},
-            version => '3',
-            headers => $building->{headers},
+        $message = _received_response(
+            $pseudo->{':status'},
+            $building->{headers},
+            $fin,
         );
-
-        if ($fin) {
-            $message->freeze;
-        } else {
-            $message->mark_incomplete;
-            $message->freeze_initial;
-        }
 
         my $transaction = $self->{transactions}{$id}
             or croak "received HTTP/3 response for unknown Transaction";
@@ -3685,11 +3745,24 @@ sub _finish_headers {
 
     my $lifecycle = $self->{stream_lifecycle}{$id};
 
-    if (
-        defined($lifecycle)
-        && defined($lifecycle->{remote_reset_code})
-    ) {
-        $message->_mark_reset($lifecycle->{remote_reset_code});
+    my $transaction = $self->{transactions}{$id};
+
+    if (defined($lifecycle) && defined($transaction)) {
+        if (defined $lifecycle->{remote_reset_code}) {
+            $transaction->_mark_remote_reset(
+                $lifecycle->{remote_reset_code},
+            );
+            $transaction->_mark_cancelled
+                unless $transaction->is_terminal;
+        }
+
+        if (defined $lifecycle->{remote_stop_sending_code}) {
+            $transaction->_mark_remote_stop_sending(
+                $lifecycle->{remote_stop_sending_code},
+            );
+            $transaction->_mark_cancelled
+                unless $transaction->is_terminal;
+        }
     }
 
     $self->{messages}{$id} = $message;
@@ -3760,16 +3833,16 @@ sub _assert_peer_field_section_size {
 }
 
 sub _wire_headers {
-    my ($message, $context) = @_;
+    my ($source, $context) = @_;
 
     croak 'internal HTTP/3 header context must be request or response'
         if $context ne 'request' && $context ne 'response';
 
     my @headers;
 
-    for my $index (0 .. $message->header_count - 1) {
-        my $name = $message->header_name($index);
-        my $value = $message->header_value($index);
+    for my $field (@$source) {
+        my $name = $field->[0];
+        my $value = $field->[1];
 
         $name =~ tr/A-Z/a-z/;
 
@@ -3781,13 +3854,13 @@ sub _wire_headers {
 }
 
 sub _wire_trailers {
-    my ($message) = @_;
+    my ($source) = @_;
 
     my @trailers;
 
-    for my $index (0 .. $message->trailer_count - 1) {
-        my $name = $message->trailer_name($index);
-        my $value = $message->trailer_value($index);
+    for my $field (@$source) {
+        my $name = $field->[0];
+        my $value = $field->[1];
 
         $name =~ tr/A-Z/a-z/;
 
@@ -3813,54 +3886,65 @@ sub _submit_request {
         unless $self->{role} eq 'client';
     croak 'HTTP/3 connection has not been started'
         unless $self->{started};
-    croak 'request must be a Uniform::HTTP::Request object'
-        unless blessed($request)
-            && $request->isa('Uniform::HTTP::Request');
-    my $is_connect = $request->method eq 'CONNECT' ? 1 : 0;
+    croak 'request must be a canonical Uniform::HTTP::Request'
+        unless ref($request) eq 'Uniform::HTTP::Request';
+
+    my $view = Uniform::HTTP::FastPath::view($request);
+    my $method = $view->[Uniform::HTTP::FastPath::SLOT_METHOD()];
+    my $target = $view->[Uniform::HTTP::FastPath::SLOT_TARGET()];
+    my $scheme = $view->[Uniform::HTTP::FastPath::SLOT_SCHEME()];
+    my $authority = $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()];
+    my $protocol = $view->[Uniform::HTTP::FastPath::SLOT_PROTOCOL()];
+    my $headers = $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()];
+    my $trailers = $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()];
+    my $flags = $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()];
+
+    my $is_connect = $method eq 'CONNECT' ? 1 : 0;
     my $is_extended_connect =
-        $is_connect && defined($request->protocol) ? 1 : 0;
+        $is_connect && defined($protocol) ? 1 : 0;
 
     if ($is_connect) {
         croak 'HTTP/3 CONNECT request requires authority'
-            unless defined $request->authority;
+            unless defined $authority;
         croak 'HTTP/3 peer did not enable Extended CONNECT'
             if $is_extended_connect
                 && !$self->{peer_enable_connect_protocol};
     } else {
         croak 'HTTP/3 request requires scheme'
-            unless defined $request->scheme;
+            unless defined $scheme;
         croak 'HTTP/3 request requires authority'
-            unless defined $request->authority;
+            unless defined $authority;
     }
     croak 'HTTP/3 peer has begun graceful shutdown'
         if defined $self->{remote_shutdown_id};
     croak 'HTTP/3 connection is shutting down'
         if $self->{shutdown_notice_sent} || $self->{shutdown_started};
 
+    my $wire_headers = _wire_headers($headers, 'request');
     my @fields;
 
     if ($is_extended_connect) {
         @fields = (
             [ ':method',    'CONNECT' ],
-            [ ':protocol',  $request->protocol ],
-            [ ':scheme',    $request->scheme ],
-            [ ':authority', $request->authority ],
-            [ ':path',      $request->target ],
-            @{ _wire_headers($request, 'request') },
+            [ ':protocol',  $protocol ],
+            [ ':scheme',    $scheme ],
+            [ ':authority', $authority ],
+            [ ':path',      $target ],
+            @$wire_headers,
         );
     } elsif ($is_connect) {
         @fields = (
             [ ':method',    'CONNECT' ],
-            [ ':authority', $request->authority ],
-            @{ _wire_headers($request, 'request') },
+            [ ':authority', $authority ],
+            @$wire_headers,
         );
     } else {
         @fields = (
-            [ ':method',    $request->method ],
-            [ ':scheme',    $request->scheme ],
-            [ ':authority', $request->authority ],
-            [ ':path',      $request->target ],
-            @{ _wire_headers($request, 'request') },
+            [ ':method',    $method ],
+            [ ':scheme',    $scheme ],
+            [ ':authority', $authority ],
+            [ ':path',      $target ],
+            @$wire_headers,
         );
     }
 
@@ -3869,8 +3953,8 @@ sub _submit_request {
         'request()',
     );
 
-    my $wire_trailers = $request->has_trailers
-        ? _wire_trailers($request)
+    my $wire_trailers = @$trailers
+        ? _wire_trailers($trailers)
         : undef;
 
     $self->_assert_peer_field_section_size(
@@ -3885,9 +3969,10 @@ sub _submit_request {
     $self->{streams}{$id} = $stream;
 
     $streaming = $streaming ? 1 : 0;
-    my $wire_body = $request->has_buffered_body
-        ? $request->body
-        : (!$streaming && $request->has_trailers ? '' : undef);
+    my $wire_body =
+        $flags & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()
+            ? $view->[Uniform::HTTP::FastPath::SLOT_BODY()]
+            : (!$streaming && @$trailers ? '' : undef);
 
     $self->{native}->submit_request(
         $id,
@@ -3906,16 +3991,6 @@ sub _submit_request {
     $request->freeze;
     $self->{outgoing}{$id} = $request;
 
-    my $lifecycle = $self->{stream_lifecycle}{$id};
-    if (
-        defined($lifecycle)
-        && defined($lifecycle->{remote_stop_sending_code})
-    ) {
-        $request->_mark_stop_sending(
-            $lifecycle->{remote_stop_sending_code},
-        ) if $request->can('_mark_stop_sending');
-    }
-
     $self->_drain_output;
 
     return $id;
@@ -3928,15 +4003,22 @@ sub _submit_response {
         unless $self->{role} eq 'server';
     croak 'HTTP/3 connection has not been started'
         unless $self->{started};
-    croak 'response must be a Unblock::HTTP3::Response object'
-        unless blessed($response)
-            && $response->isa('Unblock::HTTP3::Response');
+    croak 'response must be a canonical Uniform::HTTP::Response'
+        unless ref($response) eq 'Uniform::HTTP::Response';
     croak 'unknown HTTP/3 request stream'
         unless defined $self->{streams}{$stream_id};
 
+    my $view = Uniform::HTTP::FastPath::view($response);
+    my $headers = $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()];
+    my $trailers = $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()];
+    my $flags = $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()];
+
     my @fields = (
-        [ ':status', "" . $response->status ],
-        @{ _wire_headers($response, 'response') },
+        [
+            ':status',
+            "" . $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
+        ],
+        @{ _wire_headers($headers, 'response') },
     );
 
     $self->_assert_peer_field_section_size(
@@ -3944,8 +4026,8 @@ sub _submit_response {
         'send_response()',
     );
 
-    my $wire_trailers = $response->has_trailers
-        ? _wire_trailers($response)
+    my $wire_trailers = @$trailers
+        ? _wire_trailers($trailers)
         : undef;
 
     $self->_assert_peer_field_section_size(
@@ -3958,9 +4040,10 @@ sub _submit_response {
         && $transaction->_response_is_streaming
         ? 1
         : 0;
-    my $wire_body = $response->has_buffered_body
-        ? $response->body
-        : (!$streaming && $response->has_trailers ? '' : undef);
+    my $wire_body =
+        $flags & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()
+            ? $view->[Uniform::HTTP::FastPath::SLOT_BODY()]
+            : (!$streaming && @$trailers ? '' : undef);
 
     $self->{native}->submit_response(
         $stream_id,
@@ -3978,16 +4061,6 @@ sub _submit_response {
 
     $response->freeze;
     $self->{outgoing}{$stream_id} = $response;
-
-    my $lifecycle = $self->{stream_lifecycle}{$stream_id};
-    if (
-        defined($lifecycle)
-        && defined($lifecycle->{remote_stop_sending_code})
-    ) {
-        $response->_mark_stop_sending(
-            $lifecycle->{remote_stop_sending_code},
-        ) if $response->can('_mark_stop_sending');
-    }
 
     $self->_drain_output;
 
@@ -4258,7 +4331,7 @@ Returns the Connection.
     my $tx = $h3->request($request);
 
 Client only. Submits a L<Uniform::HTTP::Request> or
-L<Unblock::HTTP3::Request> and returns a L<Unblock::HTTP3::Transaction>.
+L<Uniform::HTTP::Request> and returns a L<Unblock::HTTP3::Transaction>.
 
 Useful per-request options are:
 
@@ -4509,7 +4582,7 @@ release does not implement it.
 =head1 SEE ALSO
 
 L<Unblock::HTTP3>, L<Unblock::HTTP3::Transaction>,
-L<Unblock::HTTP3::Request>, L<Unblock::HTTP3::Response>, L<Net::QUIC>,
+L<Uniform::HTTP::Request>, L<Uniform::HTTP::Response>, L<Net::QUIC>,
 L<Uniform::HTTP>
 
 =head1 AUTHOR

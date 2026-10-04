@@ -47,7 +47,7 @@ Unblock::HTTP3 0.01 requires:
 Perl            5.20+
 Alien::nghttp3  0.01+
 Net::QUIC       0.04+
-Uniform::HTTP   0.04+
+Uniform::HTTP   0.05+
 ```
 
 ## Start here
@@ -58,8 +58,9 @@ Most code works with three things:
 - `Unblock::HTTP3::Transaction` - one request and its response
 - `Uniform::HTTP::Request` and `Uniform::HTTP::Response` - HTTP messages
 
-`Unblock::HTTP3::Request` and `Unblock::HTTP3::Response` are optional thin
-subclasses with a few HTTP/3-specific helpers.
+Unblock::HTTP3 uses the canonical Uniform message classes directly. HTTP/3
+priority, reset, and STOP_SENDING state live on the Transaction rather than on
+the message object.
 
 An HTTP/3 Connection wraps an existing `Net::QUIC::Connection`:
 
@@ -185,7 +186,7 @@ Servers can also send 1xx informational responses before the final response:
 
 ```perl
 $tx->send_informational(
-    Unblock::HTTP3::Response->new(
+    Uniform::HTTP::Response->new(
         status => 103,
     ),
 );
@@ -274,22 +275,21 @@ are ignored.
 
 ## Request priority
 
-RFC 9218 priority can be set on a request:
+RFC 9218 priority can be supplied through the normal Uniform Priority header:
 
 ```perl
-my $request = Unblock::HTTP3::Request->new(
+my $request = Uniform::HTTP::Request->new(
     method    => 'GET',
     target    => '/',
     scheme    => 'https',
     authority => 'example.com',
-    priority  => {
-        urgency     => 1,
-        incremental => 1,
-    },
+    headers   => [
+        [ Priority => 'u=1, i' ],
+    ],
 );
 ```
 
-It can also be changed on a live Transaction:
+It can be inspected or changed on a live Transaction:
 
 ```perl
 $tx->priority(

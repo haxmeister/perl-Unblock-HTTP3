@@ -55,14 +55,14 @@ ngtcp2 and TLS remain below Net::QUIC.
 
 ## HTTP message objects
 
-Uniform::HTTP 0.04 is the runtime HTTP message layer.
+Uniform::HTTP 0.05 is the runtime HTTP message layer.
 
-`Unblock::HTTP3::Request` is a thin subclass of `Uniform::HTTP::Request`.
-`Unblock::HTTP3::Response` is a thin subclass of
-`Uniform::HTTP::Response`. They inherit the common message implementation
-instead of copying it.
+Unblock::HTTP3 uses exact canonical `Uniform::HTTP::Request` and
+`Uniform::HTTP::Response` objects directly. HTTP/3-specific lifecycle and
+priority state belongs to `Unblock::HTTP3::Transaction`, not to HTTP message
+subclasses.
 
-A client may also submit a plain `Uniform::HTTP::Request` directly.
+A client submits a canonical `Uniform::HTTP::Request` directly.
 Unblock::HTTP3 validates the request for HTTP/3 when it is sent. This keeps
 Uniform neutral: it can represent temporarily incomplete or cross-field-invalid
 message combinations while the selected protocol engine remains responsible
@@ -406,7 +406,7 @@ values when the caller uses type-dispatch handlers.
 
 Request and response trailers are supported.
 
-They are stored separately from normal headers by Uniform::HTTP 0.04.
+They are stored separately from normal headers by Uniform::HTTP 0.05.
 Incoming initial fields are frozen when their HEADERS section completes while
 trailers remain independently writable until the trailing section ends.
 
@@ -426,9 +426,9 @@ The defaults remain conservative.
 
 RESET_STREAM and STOP_SENDING are passed between Net::QUIC and libnghttp3.
 
-The Unblock Request and Response convenience subclasses record stream-abort
-diagnostics without changing Uniform's generic message contract. Transaction
-state remains the authoritative HTTP/3 lifecycle.
+Transaction records HTTP/3 stream-abort diagnostics directly. Local and remote
+RESET_STREAM and STOP_SENDING codes remain transport state and never modify the
+canonical Uniform message objects.
 
 Cancelled streaming body buffers are released without losing later QUIC ACK
 accounting.
@@ -502,7 +502,7 @@ The current baseline is:
 
 - Alien::nghttp3 0.01
 - Net::QUIC 0.04
-- Uniform::HTTP 0.04 as the runtime HTTP message layer
+- Uniform::HTTP 0.05 as the runtime HTTP message layer
 
 Unblock::HTTP3 integration tests do not install Net::QUIC from GitHub.
 
