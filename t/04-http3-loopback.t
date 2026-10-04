@@ -16,7 +16,7 @@ use Unblock::HTTP3::Response;
 use Net::QUIC;
 use Net::QUIC::Driver;
 
-is($Net::QUIC::VERSION, '0.03', 'vertical slice uses CPAN Net::QUIC 0.03');
+is($Net::QUIC::VERSION, '0.04', 'vertical slice uses CPAN Net::QUIC 0.04');
 
 my $tls_dir = tempdir(CLEANUP => 1);
 my $cert_file = "$tls_dir/server-cert.pem";

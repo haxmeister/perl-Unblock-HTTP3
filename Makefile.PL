@@ -47,7 +47,7 @@ WriteMakefile(
     PREREQ_PM => {
         'Alien::nghttp3' => '0.01',
         'Carp'           => 0,
-        'Net::QUIC'      => '0.03',
+        'Net::QUIC'      => '0.04',
         'Scalar::Util'    => 0,
         'Time::HiRes'     => 0,
         'XSLoader'        => 0,

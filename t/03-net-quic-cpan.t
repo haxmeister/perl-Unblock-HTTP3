@@ -10,7 +10,7 @@ use Unblock::HTTP3::_Native;
 use Net::QUIC;
 use Net::QUIC::Endpoint;
 
-is($Net::QUIC::VERSION, '0.03', 'testing released Net::QUIC 0.03');
+is($Net::QUIC::VERSION, '0.04', 'testing released Net::QUIC 0.04');
 
 my $endpoint = Net::QUIC::Endpoint->client(
     local       => pack_sockaddr_in(40030, inet_aton('127.0.0.1')),
