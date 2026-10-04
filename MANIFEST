@@ -10,6 +10,7 @@ README.md
 SECURITY.md
 docs/ARCHITECTURE.md
 docs/INTEROPERABILITY.md
+docs/RELEASE-0.01.md
 lib/Unblock/HTTP3.pm
 lib/Unblock/HTTP3/Body/Reader.pm
 lib/Unblock/HTTP3/Body/Stream.pm

@@ -163,6 +163,20 @@ sub run_target {
 
     my $handshake_ok = $run_until->(sub { $quic->ready }, 15);
 
+    if (!$handshake_ok) {
+        my $close = eval { $quic->close_info };
+        if (defined($close) && ref($close) eq 'HASH') {
+            diag(
+                "$target->{name} QUIC close: type="
+                . ($close->{type} // '(unknown)')
+                . "; code="
+                . (defined($close->{code}) ? $close->{code} : '(unknown)')
+                . "; initiator="
+                . ($close->{initiator} // '(unknown)')
+            );
+        }
+    }
+
     if (!$handshake_ok && !$target->{required}) {
         pass('diagnostic target did not complete QUIC/TLS handshake; not release-blocking');
         diag(

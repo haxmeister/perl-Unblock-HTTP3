@@ -4038,6 +4038,8 @@ Useful options include:
     max_buffered_datagrams
     extension_settings
     on_extension_settings
+    remembered_peer_settings
+    remembered_local_settings
 
 C<enable_extended_connect> is a server-only boolean. When enabled, the
 server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL and accepts the generic
@@ -4064,6 +4066,15 @@ C<on_extension_settings> is called once after the peer SETTINGS frame is
 accepted. It receives the Connection and a hash reference containing peer
 extension SETTINGS. The callback may C<die> to reject invalid extension
 settings. Unblock::HTTP3 then closes the connection with C<H3_SETTINGS_ERROR>.
+
+C<remembered_peer_settings> is client-only. It accepts the opaque value returned
+by C<peer_settings_state> on the previous HTTP/3 connection and supplies the
+initial server SETTINGS view required for 0-RTT.
+
+C<remembered_local_settings> is server-only. It accepts the opaque previously
+advertised state returned by C<local_settings_state>. A server that accepts
+QUIC early data uses this to verify that its current HTTP/3 configuration is
+compatible with what the client could have remembered.
 
 C<quic_max_bidi_streams> is a server-side synchronization hint for
 libnghttp3. It defaults to 100, matching Net::QUIC 0.04. If the QUIC server was
@@ -4101,9 +4112,16 @@ Transaction receive queues were full.
 
 =head2 start
 
-Starts HTTP/3 after the QUIC connection is ready.
+Starts HTTP/3.
 
-This creates the local control stream and QPACK encoder and decoder streams.
+Normally QUIC is already ready. A client with C<remembered_peer_settings> may
+also start while Net::QUIC reports pending 0-RTT. A server with
+C<remembered_local_settings> may start early so it can parse accepted 0-RTT
+request streams.
+
+The client creates its control and QPACK streams in early data when necessary.
+A server receiving 0-RTT waits until 1-RTT is ready before creating its own
+outgoing control and QPACK streams.
 
 =head2 nghttp3_version
 
@@ -4121,6 +4139,35 @@ True when this server connection advertises Extended CONNECT support.
 =head2 peer_extended_connect_enabled
 
 True when the peer advertised SETTINGS_ENABLE_CONNECT_PROTOCOL with value 1.
+
+=head2 early_data_status
+
+Returns the underlying Net::QUIC early-data status: C<none>, C<pending>,
+C<accepted>, or C<rejected>.
+
+Checking this method also synchronizes any required HTTP/3 rollback after QUIC
+rejects early data.
+
+=head2 local_settings_state
+
+Returns an opaque byte string containing this endpoint's advertised HTTP/3
+SETTINGS state. Store it without modifying it.
+
+Servers can associate this state with the period in which matching QUIC session
+tickets are valid and supply it later as C<remembered_local_settings>.
+
+=head2 peer_settings_state
+
+Returns an opaque byte string containing the current peer HTTP/3 SETTINGS after
+C<peer_settings_received> becomes true. Before that it returns C<undef>.
+
+A client should save this alongside Net::QUIC's C<early_data_state> from the
+same connection when it wants to attempt HTTP/3 0-RTT later.
+
+=head2 using_remembered_peer_settings
+
+True while a returning client is still using its remembered server SETTINGS as
+the initial 0-RTT view and the new SETTINGS frame has not yet arrived.
 
 =head2 extension_settings
 
@@ -4158,6 +4205,11 @@ Client only.
     my $tx = $h3->request($request);
 
 Returns a L<Unblock::HTTP3::Transaction>.
+
+A request sent before the QUIC handshake completes must explicitly use
+C<early_data =E<gt> 1>. Early data is replayable. Unblock::HTTP3 does not retry
+the request automatically if QUIC rejects it; the early Transaction becomes an
+error and the application decides whether to submit the operation again.
 
 C<$request> may be a plain L<Uniform::HTTP::Request> or an
 L<Unblock::HTTP3::Request>. Unblock::HTTP3 validates the Uniform request for

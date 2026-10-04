@@ -829,6 +829,15 @@ with raw QUIC stream IDs.
 
 =head1 METHODS
 
+=head2 early_data
+
+True when this Transaction's request was carried in QUIC 0-RTT.
+
+On the client this records an explicit C<early_data =E<gt> 1> submission. On
+the server it records the early-data origin reported by Net::QUIC.
+
+Applications must treat early operations as replayable.
+
 =head2 stream_id
 
 Returns the HTTP/3 request stream ID used by this Transaction.
@@ -837,7 +846,8 @@ Applications normally do not need to use the raw stream ID.
 
 =head2 request
 
-Returns the L<Unblock::HTTP3::Request>.
+Returns the submitted L<Uniform::HTTP::Request>. This can be a plain Uniform
+request or the L<Unblock::HTTP3::Request> convenience subclass.
 
 =head2 protocol
 
