@@ -123,6 +123,54 @@ sub measure_buffered_cycle {
     return;
 }
 
+sub measure_slab_cycle {
+    my ($size, $iterations, $body, $threshold) = @_;
+
+    my @chunks;
+    my $tail = '';
+    my $bytes = $size * $iterations;
+    my $start = time();
+
+    for (1 .. $iterations) {
+        if ($size >= $threshold) {
+            push @chunks, $body;
+            next;
+        }
+
+        $tail .= $body;
+
+        if (length($tail) >= $threshold) {
+            push @chunks, $tail;
+            $tail = '';
+        }
+    }
+
+    push @chunks, $tail if length $tail;
+
+    my $joined = @chunks == 1
+        ? $chunks[0]
+        : join('', @chunks);
+
+    my $elapsed = time() - $start;
+    my $mib_per_second =
+        ($bytes / (1024 * 1024)) / $elapsed;
+    my $us_per_chunk =
+        ($elapsed / $iterations) * 1_000_000;
+
+    printf "%-30s %10d %10d %12.6f %14.2f %14.2f\n",
+        "Candidate slab ${threshold}B",
+        $size,
+        $iterations,
+        $elapsed,
+        $mib_per_second,
+        $us_per_chunk;
+
+    die "slab candidate byte count failed\n"
+        unless length($joined) == $bytes;
+
+    return;
+}
+
 sub transfer_native {
     my ($source, $destination, $timestamp_ref) = @_;
 
@@ -319,6 +367,20 @@ for my $size (@sizes) {
         $size,
         $iterations,
         $body,
+    );
+
+    measure_slab_cycle(
+        $size,
+        $iterations,
+        $body,
+        16_384,
+    );
+
+    measure_slab_cycle(
+        $size,
+        $iterations,
+        $body,
+        65_536,
     );
 
     my $bench_connection =
