@@ -1,12 +1,20 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "uniform_http_fastpath.h"
 
 #include <nghttp3/nghttp3.h>
 
 #include <inttypes.h>
+#include <string.h>
 
 #define UNBLOCK_HTTP3_MAX_VARINT UINT64_C(0x3fffffffffffffff)
+
+typedef struct {
+    uhttp_native_api uniform_api;
+} my_cxt_t;
+
+START_MY_CXT
 
 typedef struct unblock_http3_body_chunk {
     SV *storage;
@@ -28,15 +36,622 @@ typedef struct unblock_http3_body {
 } unblock_http3_body;
 
 typedef struct {
+    uint8_t *name;
+    size_t namelen;
+    uint8_t *value;
+    size_t valuelen;
+} unblock_http3_captured_field;
+
+typedef struct unblock_http3_header_block {
+    int64_t stream_id;
+    unblock_http3_captured_field *fields;
+    size_t count;
+    size_t capacity;
+    size_t field_section_size;
+    struct unblock_http3_header_block *next;
+} unblock_http3_header_block;
+
+typedef struct {
     nghttp3_conn *conn;
     AV *events;
     uint8_t *origin_list_data;
     nghttp3_vec origin_list;
     unblock_http3_body *bodies;
+    unblock_http3_header_block *header_blocks;
     size_t streaming_retained_bytes;
     int is_server;
     int fatal;
 } unblock_http3_native_conn;
+
+
+static void
+unblock_http3_header_block_free(unblock_http3_header_block *block)
+{
+    size_t i;
+
+    if (block == NULL) {
+        return;
+    }
+
+    if (block->fields != NULL) {
+        for (i = 0; i < block->count; ++i) {
+            if (block->fields[i].name != NULL) {
+                Safefree(block->fields[i].name);
+            }
+            if (block->fields[i].value != NULL) {
+                Safefree(block->fields[i].value);
+            }
+        }
+
+        Safefree(block->fields);
+    }
+
+    Safefree(block);
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_find(
+    unblock_http3_native_conn *native,
+    int64_t stream_id
+)
+{
+    unblock_http3_header_block *block;
+
+    for (
+        block = native->header_blocks;
+        block != NULL;
+        block = block->next
+    ) {
+        if (block->stream_id == stream_id) {
+            return block;
+        }
+    }
+
+    return NULL;
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_create(
+    unblock_http3_native_conn *native,
+    int64_t stream_id
+)
+{
+    unblock_http3_header_block *block;
+
+    if (unblock_http3_header_block_find(native, stream_id) != NULL) {
+        croak("HTTP/3 stream already has an active header block");
+    }
+
+    Newxz(block, 1, unblock_http3_header_block);
+    block->stream_id = stream_id;
+    block->next = native->header_blocks;
+    native->header_blocks = block;
+
+    return block;
+}
+
+static void
+unblock_http3_header_block_append(
+    unblock_http3_header_block *block,
+    const uint8_t *name,
+    size_t namelen,
+    const uint8_t *value,
+    size_t valuelen
+)
+{
+    unblock_http3_captured_field *field;
+    size_t next_size;
+
+    if (block == NULL) {
+        croak("HTTP/3 header arrived without an active header block");
+    }
+
+    if (block->count == block->capacity) {
+        size_t capacity = block->capacity == 0
+            ? 8
+            : block->capacity * 2;
+
+        if (capacity < block->capacity) {
+            croak("HTTP/3 header block capacity overflow");
+        }
+
+        if (block->fields == NULL) {
+            Newxz(
+                block->fields,
+                capacity,
+                unblock_http3_captured_field
+            );
+        } else {
+            size_t old_capacity = block->capacity;
+
+            Renew(
+                block->fields,
+                capacity,
+                unblock_http3_captured_field
+            );
+            Zero(
+                block->fields + old_capacity,
+                capacity - old_capacity,
+                unblock_http3_captured_field
+            );
+        }
+
+        block->capacity = capacity;
+    }
+
+    field = &block->fields[block->count];
+
+    Newx(field->name, namelen ? namelen : 1, uint8_t);
+    Newx(field->value, valuelen ? valuelen : 1, uint8_t);
+
+    if (namelen) {
+        Copy(name, field->name, namelen, uint8_t);
+    }
+
+    if (valuelen) {
+        Copy(value, field->value, valuelen, uint8_t);
+    }
+
+    field->namelen = namelen;
+    field->valuelen = valuelen;
+    ++block->count;
+
+    if (
+        block->field_section_size > (size_t)-1 - namelen
+        || block->field_section_size + namelen > (size_t)-1 - valuelen
+        || block->field_section_size + namelen + valuelen > (size_t)-1 - 32
+    ) {
+        croak("HTTP/3 field section size overflow");
+    }
+
+    next_size =
+        block->field_section_size
+        + namelen
+        + valuelen
+        + 32;
+    block->field_section_size = next_size;
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_remove(
+    unblock_http3_native_conn *native,
+    int64_t stream_id
+)
+{
+    unblock_http3_header_block **link = &native->header_blocks;
+
+    while (*link != NULL) {
+        unblock_http3_header_block *block = *link;
+
+        if (block->stream_id != stream_id) {
+            link = &block->next;
+            continue;
+        }
+
+        *link = block->next;
+        block->next = NULL;
+        return block;
+    }
+
+    return NULL;
+}
+
+static void
+unblock_http3_header_block_free_all(
+    unblock_http3_native_conn *native
+)
+{
+    unblock_http3_header_block *block = native->header_blocks;
+
+    while (block != NULL) {
+        unblock_http3_header_block *next = block->next;
+        unblock_http3_header_block_free(block);
+        block = next;
+    }
+
+    native->header_blocks = NULL;
+}
+
+static int
+unblock_http3_captured_name_equal(
+    const unblock_http3_captured_field *field,
+    const char *name,
+    size_t namelen
+)
+{
+    return field->namelen == namelen
+        && memcmp(field->name, name, namelen) == 0;
+}
+
+static int
+unblock_http3_captured_name_equal_ci(
+    const unblock_http3_captured_field *field,
+    const char *name,
+    size_t namelen
+)
+{
+    size_t i;
+
+    if (field->namelen != namelen) {
+        return 0;
+    }
+
+    for (i = 0; i < namelen; ++i) {
+        uint8_t left = field->name[i];
+        uint8_t right = (uint8_t)name[i];
+
+        if (left >= 'A' && left <= 'Z') {
+            left = (uint8_t)(left + ('a' - 'A'));
+        }
+
+        if (right >= 'A' && right <= 'Z') {
+            right = (uint8_t)(right + ('a' - 'A'));
+        }
+
+        if (left != right) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static const unblock_http3_captured_field *
+unblock_http3_header_block_pseudo(
+    const unblock_http3_header_block *block,
+    const char *name,
+    size_t namelen
+)
+{
+    const unblock_http3_captured_field *found = NULL;
+    size_t i;
+
+    for (i = 0; i < block->count; ++i) {
+        if (
+            unblock_http3_captured_name_equal(
+                &block->fields[i],
+                name,
+                namelen
+            )
+        ) {
+            found = &block->fields[i];
+        }
+    }
+
+    return found;
+}
+
+static size_t
+unblock_http3_header_block_regular_count(
+    const unblock_http3_header_block *block
+)
+{
+    size_t i;
+    size_t count = 0;
+
+    for (i = 0; i < block->count; ++i) {
+        if (
+            block->fields[i].namelen == 0
+            || block->fields[i].name[0] != ':'
+        ) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+static void
+unblock_http3_header_block_uniform_fields(
+    pTHX_ const unblock_http3_header_block *block,
+    uhttp_native_field **pfields,
+    Size_t *pcount,
+    uint8_t **pcookie
+)
+{
+    size_t regular_count =
+        unblock_http3_header_block_regular_count(block);
+    size_t cookie_count = 0;
+    size_t cookie_length = 0;
+    size_t first_cookie = (size_t)-1;
+    size_t i;
+    size_t out_index = 0;
+    uhttp_native_field *fields = NULL;
+    uint8_t *cookie = NULL;
+
+    for (i = 0; i < block->count; ++i) {
+        const unblock_http3_captured_field *field =
+            &block->fields[i];
+
+        if (
+            field->namelen != 0
+            && field->name[0] == ':'
+        ) {
+            continue;
+        }
+
+        if (
+            unblock_http3_captured_name_equal_ci(
+                field,
+                "cookie",
+                6
+            )
+        ) {
+            if (first_cookie == (size_t)-1) {
+                first_cookie = i;
+            }
+
+            if (
+                cookie_length > (size_t)-1 - field->valuelen
+                || (
+                    cookie_count != 0
+                    && cookie_length + field->valuelen
+                        > (size_t)-1 - 2
+                )
+            ) {
+                croak("HTTP/3 Cookie field coalescing overflow");
+            }
+
+            cookie_length += field->valuelen;
+            if (cookie_count != 0) {
+                cookie_length += 2;
+            }
+            ++cookie_count;
+        }
+    }
+
+    if (cookie_count > 1) {
+        regular_count -= cookie_count - 1;
+        Newx(cookie, cookie_length ? cookie_length : 1, uint8_t);
+    }
+
+    if (regular_count != 0) {
+        Newxz(fields, regular_count, uhttp_native_field);
+    }
+
+    if (cookie_count > 1) {
+        size_t cookie_offset = 0;
+
+        for (i = 0; i < block->count; ++i) {
+            const unblock_http3_captured_field *field =
+                &block->fields[i];
+
+            if (
+                !unblock_http3_captured_name_equal_ci(
+                    field,
+                    "cookie",
+                    6
+                )
+            ) {
+                continue;
+            }
+
+            if (cookie_offset != 0) {
+                cookie[cookie_offset++] = ';';
+                cookie[cookie_offset++] = ' ';
+            }
+
+            if (field->valuelen) {
+                Copy(
+                    field->value,
+                    cookie + cookie_offset,
+                    field->valuelen,
+                    uint8_t
+                );
+                cookie_offset += field->valuelen;
+            }
+        }
+    }
+
+    for (i = 0; i < block->count; ++i) {
+        const unblock_http3_captured_field *field =
+            &block->fields[i];
+
+        if (
+            field->namelen != 0
+            && field->name[0] == ':'
+        ) {
+            continue;
+        }
+
+        if (
+            cookie_count > 1
+            && unblock_http3_captured_name_equal_ci(
+                field,
+                "cookie",
+                6
+            )
+        ) {
+            if (i != first_cookie) {
+                continue;
+            }
+
+            fields[out_index].name.data = "cookie";
+            fields[out_index].name.len = 6;
+            fields[out_index].value.data =
+                (const char *)cookie;
+            fields[out_index].value.len =
+                (STRLEN)cookie_length;
+            ++out_index;
+            continue;
+        }
+
+        fields[out_index].name.data =
+            (const char *)field->name;
+        fields[out_index].name.len =
+            (STRLEN)field->namelen;
+        fields[out_index].value.data =
+            (const char *)field->value;
+        fields[out_index].value.len =
+            (STRLEN)field->valuelen;
+        ++out_index;
+    }
+
+    *pfields = fields;
+    *pcount = (Size_t)regular_count;
+    *pcookie = cookie;
+}
+
+static uhttp_native_bytes
+unblock_http3_uniform_bytes_from_sv(SV *value)
+{
+    uhttp_native_bytes bytes;
+    STRLEN len;
+    const char *data;
+
+    if (value == NULL || !SvOK(value)) {
+        bytes.data = NULL;
+        bytes.len = 0;
+        return bytes;
+    }
+
+    data = SvPVbyte(value, len);
+    bytes.data = data;
+    bytes.len = len;
+    return bytes;
+}
+
+static U32
+unblock_http3_received_uniform_flags(
+    U32 kind,
+    int fin
+)
+{
+    U32 flags =
+        UHTTP_HEADERS_LOSSLESS
+        | UHTTP_TRAILERS_LOSSLESS;
+
+    if (kind == UHTTP_KIND_REQUEST) {
+        flags |= UHTTP_TARGET_EXACT;
+    }
+
+    if (fin) {
+        flags |= UHTTP_COMPLETE;
+    } else {
+        flags |=
+            UHTTP_MUTABLE
+            | UHTTP_BODY_MUTABLE
+            | UHTTP_TRAILERS_MUTABLE;
+    }
+
+    return flags;
+}
+
+
+static SV *
+unblock_http3_header_block_uniform_request(
+    pTHX_ unblock_http3_header_block *block,
+    SV *method,
+    SV *target,
+    SV *scheme,
+    SV *authority,
+    SV *protocol,
+    int fin
+)
+{
+    dMY_CXT;
+    uhttp_native_input input;
+    uhttp_native_field *fields = NULL;
+    Size_t field_count = 0;
+    uint8_t *cookie = NULL;
+    SV *object;
+
+    unblock_http3_header_block_uniform_fields(
+        aTHX_ block,
+        &fields,
+        &field_count,
+        &cookie
+    );
+
+    uhttp_native_input_init(
+        &input,
+        UHTTP_KIND_REQUEST
+    );
+    input.flags = unblock_http3_received_uniform_flags(
+        UHTTP_KIND_REQUEST,
+        fin
+    );
+    input.version.data = "3";
+    input.version.len = 1;
+    input.method =
+        unblock_http3_uniform_bytes_from_sv(method);
+    input.target =
+        unblock_http3_uniform_bytes_from_sv(target);
+    input.scheme =
+        unblock_http3_uniform_bytes_from_sv(scheme);
+    input.authority =
+        unblock_http3_uniform_bytes_from_sv(authority);
+    input.protocol =
+        unblock_http3_uniform_bytes_from_sv(protocol);
+    input.headers = fields;
+    input.header_count = field_count;
+
+    object = uhttp_native_from_validated(
+        aTHX_ &MY_CXT.uniform_api,
+        &input,
+        UHTTP_NATIVE_TRUSTED
+    );
+
+    if (cookie != NULL) {
+        Safefree(cookie);
+    }
+    if (fields != NULL) {
+        Safefree(fields);
+    }
+
+    return object;
+}
+
+static SV *
+unblock_http3_header_block_uniform_response(
+    pTHX_ unblock_http3_header_block *block,
+    IV status,
+    int fin
+)
+{
+    dMY_CXT;
+    uhttp_native_input input;
+    uhttp_native_field *fields = NULL;
+    Size_t field_count = 0;
+    uint8_t *cookie = NULL;
+    SV *object;
+
+    unblock_http3_header_block_uniform_fields(
+        aTHX_ block,
+        &fields,
+        &field_count,
+        &cookie
+    );
+
+    uhttp_native_input_init(
+        &input,
+        UHTTP_KIND_RESPONSE
+    );
+    input.flags = unblock_http3_received_uniform_flags(
+        UHTTP_KIND_RESPONSE,
+        fin
+    );
+    input.version.data = "3";
+    input.version.len = 1;
+    input.status = status;
+    input.headers = fields;
+    input.header_count = field_count;
+
+    object = uhttp_native_from_validated(
+        aTHX_ &MY_CXT.uniform_api,
+        &input,
+        UHTTP_NATIVE_TRUSTED
+    );
+
+    if (cookie != NULL) {
+        Safefree(cookie);
+    }
+    if (fields != NULL) {
+        Safefree(fields);
+    }
+
+    return object;
+}
 
 static void
 unblock_http3_fail(const char *operation, int rv)
@@ -534,9 +1149,9 @@ unblock_http3_begin_headers_cb(
     (void)conn;
     (void)stream_user_data;
 
-    unblock_http3_push_event(
+    (void)unblock_http3_header_block_create(
         native,
-        unblock_http3_event_new("begin_headers", stream_id)
+        stream_id
     );
 
     return 0;
@@ -556,18 +1171,23 @@ unblock_http3_recv_header_cb(
 {
     unblock_http3_native_conn *native =
         (unblock_http3_native_conn *)conn_user_data;
+    unblock_http3_header_block *block =
+        unblock_http3_header_block_find(native, stream_id);
     nghttp3_vec nbuf = nghttp3_rcbuf_get_buf(name);
     nghttp3_vec vbuf = nghttp3_rcbuf_get_buf(value);
-    AV *event = unblock_http3_event_new("header", stream_id);
 
     (void)conn;
     (void)token;
     (void)flags;
     (void)stream_user_data;
 
-    av_push(event, newSVpvn((const char *)nbuf.base, nbuf.len));
-    av_push(event, newSVpvn((const char *)vbuf.base, vbuf.len));
-    unblock_http3_push_event(native, event);
+    unblock_http3_header_block_append(
+        block,
+        nbuf.base,
+        nbuf.len,
+        vbuf.base,
+        vbuf.len
+    );
 
     return 0;
 }
@@ -583,11 +1203,19 @@ unblock_http3_end_headers_cb(
 {
     unblock_http3_native_conn *native =
         (unblock_http3_native_conn *)conn_user_data;
-    AV *event = unblock_http3_event_new("end_headers", stream_id);
+    unblock_http3_header_block *block =
+        unblock_http3_header_block_find(native, stream_id);
+    AV *event;
 
     (void)conn;
     (void)stream_user_data;
 
+    if (block == NULL) {
+        croak("HTTP/3 header section ended without beginning");
+    }
+
+    event = unblock_http3_event_new("headers", stream_id);
+    av_push(event, newSVuv((UV)block->field_section_size));
     av_push(event, newSViv(fin ? 1 : 0));
     unblock_http3_push_event(native, event);
 
@@ -915,6 +1543,701 @@ unblock_http3_new_conn(
     return unblock_http3_bless_conn(native);
 }
 
+
+typedef struct {
+    nghttp3_nv *nva;
+    uint8_t **owned_names;
+    size_t nvlen;
+} unblock_http3_uniform_fields;
+
+static int
+unblock_http3_bytes_equal(
+    const uint8_t *left,
+    size_t left_len,
+    const char *right
+)
+{
+    size_t right_len = strlen(right);
+
+    return left_len == right_len
+        && memcmp(left, right, right_len) == 0;
+}
+
+static int
+unblock_http3_ascii_equal_ci(
+    const uint8_t *left,
+    size_t left_len,
+    const char *right
+)
+{
+    size_t i;
+    size_t right_len = strlen(right);
+
+    if (left_len != right_len) {
+        return 0;
+    }
+
+    for (i = 0; i < left_len; ++i) {
+        uint8_t ch = left[i];
+        uint8_t expected = (uint8_t)right[i];
+
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = (uint8_t)(ch + ('a' - 'A'));
+        }
+
+        if (expected >= 'A' && expected <= 'Z') {
+            expected = (uint8_t)(expected + ('a' - 'A'));
+        }
+
+        if (ch != expected) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static void
+unblock_http3_uniform_fields_free(unblock_http3_uniform_fields *fields)
+{
+    size_t i;
+
+    if (fields == NULL) {
+        return;
+    }
+
+    if (fields->owned_names != NULL) {
+        for (i = 0; i < fields->nvlen; ++i) {
+            if (fields->owned_names[i] != NULL) {
+                Safefree(fields->owned_names[i]);
+            }
+        }
+
+        Safefree(fields->owned_names);
+    }
+
+    if (fields->nva != NULL) {
+        Safefree(fields->nva);
+    }
+
+    fields->nva = NULL;
+    fields->owned_names = NULL;
+    fields->nvlen = 0;
+}
+
+static void
+unblock_http3_uniform_nv_static(
+    nghttp3_nv *nv,
+    const char *name,
+    const char *value,
+    size_t value_len
+)
+{
+    nv->name = (const uint8_t *)name;
+    nv->namelen = strlen(name);
+    nv->value = (const uint8_t *)value;
+    nv->valuelen = value_len;
+    nv->flags = NGHTTP3_NV_FLAG_NONE;
+}
+
+static void
+unblock_http3_uniform_nv_sv(
+    nghttp3_nv *nv,
+    const char *name,
+    SV *value
+)
+{
+    STRLEN len;
+    const char *bytes = SvPVbyte(value, len);
+
+    unblock_http3_uniform_nv_static(
+        nv,
+        name,
+        bytes,
+        (size_t)len
+    );
+}
+
+static void
+unblock_http3_validate_uniform_field(
+    int context,
+    const uint8_t *name,
+    size_t namelen,
+    const uint8_t *value,
+    size_t valuelen
+)
+{
+    size_t start;
+    size_t end;
+
+    if (
+        unblock_http3_ascii_equal_ci(name, namelen, "connection")
+        || unblock_http3_ascii_equal_ci(name, namelen, "keep-alive")
+        || unblock_http3_ascii_equal_ci(name, namelen, "proxy-connection")
+        || unblock_http3_ascii_equal_ci(name, namelen, "transfer-encoding")
+        || unblock_http3_ascii_equal_ci(name, namelen, "upgrade")
+    ) {
+        croak("HTTP/3 does not allow connection-specific field '%.*s'",
+            (int)namelen, (const char *)name);
+    }
+
+    if (unblock_http3_ascii_equal_ci(name, namelen, "te")) {
+        if (context != 0) {
+            croak("HTTP/3 TE is only allowed in request headers");
+        }
+
+        start = 0;
+        end = valuelen;
+
+        while (
+            start < end
+            && (value[start] == ' ' || value[start] == '\t')
+        ) {
+            ++start;
+        }
+
+        while (
+            end > start
+            && (value[end - 1] == ' ' || value[end - 1] == '\t')
+        ) {
+            --end;
+        }
+
+        if (
+            !unblock_http3_ascii_equal_ci(
+                value + start,
+                end - start,
+                "trailers"
+            )
+        ) {
+            croak("HTTP/3 TE field may contain only 'trailers'");
+        }
+    }
+
+    if (context == 2) {
+        if (unblock_http3_ascii_equal_ci(name, namelen, "content-length")) {
+            croak("HTTP/3 Content-Length is not allowed in trailers");
+        }
+
+        if (unblock_http3_ascii_equal_ci(name, namelen, "host")) {
+            croak("HTTP/3 Host is not allowed in trailers");
+        }
+    }
+}
+
+
+static void
+unblock_http3_uniform_validate_section(
+    pTHX_ const uhttp_native_section *section,
+    int context
+)
+{
+    Size_t i;
+    Size_t count = uhttp_native_field_count(aTHX_ section);
+
+    for (i = 0; i < count; ++i) {
+        SV *name_sv;
+        SV *value_sv;
+        STRLEN namelen;
+        STRLEN valuelen;
+        const char *name;
+        const char *value;
+
+        if (
+            !uhttp_native_field_at(
+                aTHX_ section,
+                i,
+                &name_sv,
+                &value_sv
+            )
+        ) {
+            croak("Uniform field inspection failed");
+        }
+
+        name = SvPVbyte(name_sv, namelen);
+        value = SvPVbyte(value_sv, valuelen);
+
+        unblock_http3_validate_uniform_field(
+            context,
+            (const uint8_t *)name,
+            (size_t)namelen,
+            (const uint8_t *)value,
+            (size_t)valuelen
+        );
+    }
+}
+
+static size_t
+unblock_http3_uniform_section_size(
+    pTHX_ const uhttp_native_section *section
+)
+{
+    Size_t i;
+    Size_t count = uhttp_native_field_count(aTHX_ section);
+    size_t total = 0;
+
+    for (i = 0; i < count; ++i) {
+        SV *name_sv;
+        SV *value_sv;
+        STRLEN namelen;
+        STRLEN valuelen;
+
+        if (
+            !uhttp_native_field_at(
+                aTHX_ section,
+                i,
+                &name_sv,
+                &value_sv
+            )
+        ) {
+            croak("Uniform header inspection failed");
+        }
+
+        (void)SvPVbyte(name_sv, namelen);
+        (void)SvPVbyte(value_sv, valuelen);
+
+        if (
+            total > SIZE_MAX - (size_t)namelen
+            || total + (size_t)namelen > SIZE_MAX - (size_t)valuelen
+            || total + (size_t)namelen + (size_t)valuelen > SIZE_MAX - 32
+        ) {
+            croak("HTTP/3 field section size overflow");
+        }
+
+        total += (size_t)namelen + (size_t)valuelen + 32;
+    }
+
+    return total;
+}
+
+static size_t
+unblock_http3_uniform_pseudo_size(
+    const char *name,
+    SV *value
+)
+{
+    STRLEN valuelen;
+
+    (void)SvPVbyte(value, valuelen);
+    return strlen(name) + (size_t)valuelen + 32;
+}
+
+static void
+unblock_http3_uniform_add_section(
+    pTHX_ unblock_http3_uniform_fields *out,
+    size_t *index,
+    const uhttp_native_section *section,
+    int context
+)
+{
+    Size_t i;
+    Size_t count = uhttp_native_field_count(aTHX_ section);
+
+    for (i = 0; i < count; ++i) {
+        SV *name_sv;
+        SV *value_sv;
+        STRLEN namelen;
+        STRLEN valuelen;
+        const char *name;
+        const char *value;
+        uint8_t *lower = NULL;
+        size_t j;
+        int needs_lower = 0;
+
+        if (
+            !uhttp_native_field_at(
+                aTHX_ section,
+                i,
+                &name_sv,
+                &value_sv
+            )
+        ) {
+            croak("Uniform field inspection failed");
+        }
+
+        name = SvPVbyte(name_sv, namelen);
+        value = SvPVbyte(value_sv, valuelen);
+
+        for (j = 0; j < (size_t)namelen; ++j) {
+            uint8_t ch = (uint8_t)name[j];
+
+            if (ch >= 'A' && ch <= 'Z') {
+                needs_lower = 1;
+                break;
+            }
+        }
+
+        if (needs_lower) {
+            Newx(lower, namelen ? namelen : 1, uint8_t);
+
+            for (j = 0; j < (size_t)namelen; ++j) {
+                uint8_t ch = (uint8_t)name[j];
+
+                if (ch >= 'A' && ch <= 'Z') {
+                    ch = (uint8_t)(ch + ('a' - 'A'));
+                }
+
+                lower[j] = ch;
+            }
+
+            out->nva[*index].name = lower;
+        } else {
+            out->nva[*index].name = (const uint8_t *)name;
+        }
+        out->nva[*index].namelen = (size_t)namelen;
+        out->nva[*index].value = (const uint8_t *)value;
+        out->nva[*index].valuelen = (size_t)valuelen;
+        out->nva[*index].flags = NGHTTP3_NV_FLAG_NONE;
+        out->owned_names[*index] = lower;
+        ++*index;
+    }
+}
+
+static int
+unblock_http3_uniform_request_shape(
+    pTHX_ const uhttp_native_view *view,
+    int *is_connect,
+    int *is_extended
+)
+{
+    STRLEN method_len;
+    const char *method;
+
+    if (!SvOK(view->method) || !SvOK(view->target)) {
+        croak("canonical Uniform request is missing method or target");
+    }
+
+    method = SvPVbyte(view->method, method_len);
+    *is_connect =
+        method_len == 7 && memcmp(method, "CONNECT", 7) == 0
+            ? 1 : 0;
+    *is_extended = *is_connect && SvOK(view->protocol) ? 1 : 0;
+
+    if (*is_connect) {
+        if (!SvOK(view->authority)) {
+            croak("HTTP/3 CONNECT request requires authority");
+        }
+
+        if (*is_extended && !SvOK(view->scheme)) {
+            croak("HTTP/3 Extended CONNECT request requires scheme");
+        }
+    } else {
+        if (!SvOK(view->scheme)) {
+            croak("HTTP/3 request requires scheme");
+        }
+
+        if (!SvOK(view->authority)) {
+            croak("HTTP/3 request requires authority");
+        }
+    }
+
+    return 1;
+}
+
+static size_t
+unblock_http3_uniform_request_size(
+    pTHX_ const uhttp_native_view *view
+)
+{
+    int is_connect;
+    int is_extended;
+    size_t total;
+
+    unblock_http3_uniform_request_shape(
+        aTHX_ view,
+        &is_connect,
+        &is_extended
+    );
+
+    total = unblock_http3_uniform_section_size(
+        aTHX_ &view->headers
+    );
+
+    total += unblock_http3_uniform_pseudo_size(
+        ":method",
+        view->method
+    );
+
+    if (is_extended) {
+        total += unblock_http3_uniform_pseudo_size(
+            ":protocol",
+            view->protocol
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":scheme",
+            view->scheme
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":authority",
+            view->authority
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":path",
+            view->target
+        );
+    } else if (is_connect) {
+        total += unblock_http3_uniform_pseudo_size(
+            ":authority",
+            view->authority
+        );
+    } else {
+        total += unblock_http3_uniform_pseudo_size(
+            ":scheme",
+            view->scheme
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":authority",
+            view->authority
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":path",
+            view->target
+        );
+    }
+
+    return total;
+}
+
+static size_t
+unblock_http3_uniform_response_size(
+    pTHX_ const uhttp_native_view *view
+)
+{
+    IV status;
+    char status_buffer[4];
+
+    if (!SvOK(view->status)) {
+        croak("canonical Uniform response is missing status");
+    }
+
+    status = SvIV(view->status);
+
+    if (status < 100 || status > 599) {
+        croak("canonical Uniform response status is invalid");
+    }
+
+    snprintf(status_buffer, sizeof(status_buffer), "%ld", (long)status);
+
+    return strlen(":status") + strlen(status_buffer) + 32
+        + unblock_http3_uniform_section_size(
+            aTHX_ &view->headers
+        );
+}
+
+static void
+unblock_http3_uniform_request_fields(
+    pTHX_ const uhttp_native_view *view,
+    unblock_http3_uniform_fields *out
+)
+{
+    Size_t header_count = uhttp_native_field_count(
+        aTHX_ &view->headers
+    );
+    int is_connect;
+    int is_extended;
+    size_t pseudo_count;
+    size_t index = 0;
+
+    unblock_http3_uniform_request_shape(
+        aTHX_ view,
+        &is_connect,
+        &is_extended
+    );
+    unblock_http3_uniform_validate_section(
+        aTHX_ &view->headers,
+        0
+    );
+
+    pseudo_count = is_extended ? 5 : (is_connect ? 2 : 4);
+
+    Zero(out, 1, unblock_http3_uniform_fields);
+    out->nvlen = pseudo_count + (size_t)header_count;
+
+    if (out->nvlen == 0) {
+        return;
+    }
+
+    Newxz(out->nva, out->nvlen, nghttp3_nv);
+    Newxz(out->owned_names, out->nvlen, uint8_t *);
+
+    unblock_http3_uniform_nv_sv(
+        &out->nva[index++],
+        ":method",
+        view->method
+    );
+
+    if (is_extended) {
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":protocol",
+            view->protocol
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":scheme",
+            view->scheme
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":authority",
+            view->authority
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":path",
+            view->target
+        );
+    } else if (is_connect) {
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":authority",
+            view->authority
+        );
+    } else {
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":scheme",
+            view->scheme
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":authority",
+            view->authority
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":path",
+            view->target
+        );
+    }
+
+    unblock_http3_uniform_add_section(
+        aTHX_ out,
+        &index,
+        &view->headers,
+        0
+    );
+}
+
+static void
+unblock_http3_uniform_response_fields(
+    pTHX_ const uhttp_native_view *view,
+    unblock_http3_uniform_fields *out,
+    char status_buffer[4]
+)
+{
+    Size_t header_count = uhttp_native_field_count(
+        aTHX_ &view->headers
+    );
+    IV status;
+    size_t index = 0;
+
+    if (!SvOK(view->status)) {
+        croak("canonical Uniform response is missing status");
+    }
+
+    status = SvIV(view->status);
+
+    if (status < 100 || status > 599) {
+        croak("canonical Uniform response status is invalid");
+    }
+
+    snprintf(status_buffer, 4, "%ld", (long)status);
+    unblock_http3_uniform_validate_section(
+        aTHX_ &view->headers,
+        1
+    );
+
+    Zero(out, 1, unblock_http3_uniform_fields);
+    out->nvlen = 1 + (size_t)header_count;
+
+    Newxz(out->nva, out->nvlen, nghttp3_nv);
+    Newxz(out->owned_names, out->nvlen, uint8_t *);
+
+    unblock_http3_uniform_nv_static(
+        &out->nva[index++],
+        ":status",
+        status_buffer,
+        strlen(status_buffer)
+    );
+
+    unblock_http3_uniform_add_section(
+        aTHX_ out,
+        &index,
+        &view->headers,
+        1
+    );
+}
+
+static void
+unblock_http3_uniform_trailer_fields(
+    pTHX_ const uhttp_native_view *view,
+    unblock_http3_uniform_fields *out
+)
+{
+    Size_t count = uhttp_native_field_count(
+        aTHX_ &view->trailers
+    );
+    size_t index = 0;
+
+    unblock_http3_uniform_validate_section(
+        aTHX_ &view->trailers,
+        2
+    );
+    Zero(out, 1, unblock_http3_uniform_fields);
+    out->nvlen = (size_t)count;
+
+    if (out->nvlen == 0) {
+        return;
+    }
+
+    Newxz(out->nva, out->nvlen, nghttp3_nv);
+    Newxz(out->owned_names, out->nvlen, uint8_t *);
+
+    unblock_http3_uniform_add_section(
+        aTHX_ out,
+        &index,
+        &view->trailers,
+        2
+    );
+}
+
+static void
+unblock_http3_uniform_any_view(
+    pTHX_ SV *message,
+    uhttp_native_view *view
+)
+{
+    dMY_CXT;
+
+    if (
+        !uhttp_native_inspect(
+            aTHX_ &MY_CXT.uniform_api,
+            message,
+            view
+        )
+    ) {
+        croak("native Uniform fast path requires an exact canonical message");
+    }
+}
+
+static void
+unblock_http3_uniform_view(
+    pTHX_ SV *message,
+    U32 expected_kind,
+    uhttp_native_view *view
+)
+{
+    unblock_http3_uniform_any_view(
+        aTHX_ message,
+        view
+    );
+
+    if (view->kind != expected_kind) {
+        croak("canonical Uniform message has the wrong kind");
+    }
+}
+
 static nghttp3_nv *
 unblock_http3_fields_from_sv(SV *fields_sv, size_t *pnvlen)
 {
@@ -990,6 +2313,25 @@ unblock_http3_fields_from_sv(SV *fields_sv, size_t *pnvlen)
 MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native
 
 PROTOTYPES: DISABLE
+
+BOOT:
+    MY_CXT_INIT;
+    if (!uhttp_native_init(
+        aTHX_ &MY_CXT.uniform_api,
+        UHTTP_NATIVE_ABI_VERSION
+    ))
+        croak("Uniform::HTTP native FastPath ABI mismatch");
+
+void
+CLONE(...)
+    CODE:
+        MY_CXT_CLONE;
+        if (!uhttp_native_init(
+            aTHX_ &MY_CXT.uniform_api,
+            UHTTP_NATIVE_ABI_VERSION
+        ))
+            croak("Uniform::HTTP native FastPath clone ABI mismatch");
+
 
 SV *
 _parse_priority(value)
@@ -1095,6 +2437,247 @@ _new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
         RETVAL
 
 MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native::Connection
+
+SV *
+header_pseudo(self, stream_id, name)
+    SV *self
+    IV stream_id
+    SV *name
+    PREINIT:
+        unblock_http3_native_conn *native;
+        unblock_http3_header_block *block;
+        STRLEN namelen;
+        const char *name_bytes;
+        const unblock_http3_captured_field *field;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
+        name_bytes = SvPVbyte(name, namelen);
+        field = unblock_http3_header_block_pseudo(
+            block,
+            name_bytes,
+            (size_t)namelen
+        );
+
+        if (field == NULL) {
+            XSRETURN_UNDEF;
+        }
+
+        RETVAL = newSVpvn(
+            (const char *)field->value,
+            (STRLEN)field->valuelen
+        );
+    OUTPUT:
+        RETVAL
+
+SV *
+header_values(self, stream_id, name)
+    SV *self
+    IV stream_id
+    SV *name
+    PREINIT:
+        unblock_http3_native_conn *native;
+        unblock_http3_header_block *block;
+        STRLEN namelen;
+        const char *name_bytes;
+        AV *values;
+        size_t i;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
+        name_bytes = SvPVbyte(name, namelen);
+        values = newAV();
+
+        for (i = 0; i < block->count; ++i) {
+            const unblock_http3_captured_field *field =
+                &block->fields[i];
+
+            if (
+                field->namelen != 0
+                && field->name[0] == ':'
+            ) {
+                continue;
+            }
+
+            if (
+                unblock_http3_captured_name_equal_ci(
+                    field,
+                    name_bytes,
+                    (size_t)namelen
+                )
+            ) {
+                av_push(
+                    values,
+                    newSVpvn(
+                        (const char *)field->value,
+                        (STRLEN)field->valuelen
+                    )
+                );
+            }
+        }
+
+        RETVAL = newRV_noinc((SV *)values);
+    OUTPUT:
+        RETVAL
+
+int
+has_header(self, stream_id, name)
+    SV *self
+    IV stream_id
+    SV *name
+    PREINIT:
+        unblock_http3_native_conn *native;
+        unblock_http3_header_block *block;
+        STRLEN namelen;
+        const char *name_bytes;
+        size_t i;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
+        name_bytes = SvPVbyte(name, namelen);
+        RETVAL = 0;
+
+        for (i = 0; i < block->count; ++i) {
+            const unblock_http3_captured_field *field =
+                &block->fields[i];
+
+            if (
+                field->namelen != 0
+                && field->name[0] == ':'
+            ) {
+                continue;
+            }
+
+            if (
+                unblock_http3_captured_name_equal_ci(
+                    field,
+                    name_bytes,
+                    (size_t)namelen
+                )
+            ) {
+                RETVAL = 1;
+                break;
+            }
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+receive_uniform_request(self, stream_id, method, target, scheme, authority, protocol, fin)
+    SV *self
+    IV stream_id
+    SV *method
+    SV *target
+    SV *scheme
+    SV *authority
+    SV *protocol
+    IV fin
+    PREINIT:
+        unblock_http3_native_conn *native;
+        unblock_http3_header_block *block;
+        unblock_http3_header_block *removed;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
+        RETVAL = unblock_http3_header_block_uniform_request(
+            aTHX_ block,
+            method,
+            target,
+            scheme,
+            authority,
+            protocol,
+            fin ? 1 : 0
+        );
+
+        removed = unblock_http3_header_block_remove(
+            native,
+            (int64_t)stream_id
+        );
+        unblock_http3_header_block_free(removed);
+    OUTPUT:
+        RETVAL
+
+SV *
+receive_uniform_response(self, stream_id, status, fin)
+    SV *self
+    IV stream_id
+    IV status
+    IV fin
+    PREINIT:
+        unblock_http3_native_conn *native;
+        unblock_http3_header_block *block;
+        unblock_http3_header_block *removed;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_find(
+            native,
+            (int64_t)stream_id
+        );
+
+        if (block == NULL) {
+            croak("HTTP/3 stream has no pending header block");
+        }
+
+        RETVAL = unblock_http3_header_block_uniform_response(
+            aTHX_ block,
+            status,
+            fin ? 1 : 0
+        );
+
+        removed = unblock_http3_header_block_remove(
+            native,
+            (int64_t)stream_id
+        );
+        unblock_http3_header_block_free(removed);
+    OUTPUT:
+        RETVAL
+
+void
+discard_header_block(self, stream_id)
+    SV *self
+    IV stream_id
+    PREINIT:
+        unblock_http3_native_conn *native;
+        unblock_http3_header_block *block;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        block = unblock_http3_header_block_remove(
+            native,
+            (int64_t)stream_id
+        );
+        unblock_http3_header_block_free(block);
 
 const char *
 role(self)
@@ -1515,6 +3098,357 @@ close_stream(self, stream_id, rx_error = &PL_sv_undef, tx_error = &PL_sv_undef)
             (int64_t)stream_id
         );
 
+
+UV
+uniform_request_field_section_size(self, message)
+    SV *self
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        size_t size;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        (void)native;
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_REQUEST,
+            &view
+        );
+        unblock_http3_uniform_validate_section(
+            aTHX_ &view.headers,
+            0
+        );
+        size = unblock_http3_uniform_request_size(
+            aTHX_ &view
+        );
+        RETVAL = (UV)size;
+    OUTPUT:
+        RETVAL
+
+UV
+uniform_response_field_section_size(self, message)
+    SV *self
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        size_t size;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        (void)native;
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_RESPONSE,
+            &view
+        );
+        unblock_http3_uniform_validate_section(
+            aTHX_ &view.headers,
+            1
+        );
+        size = unblock_http3_uniform_response_size(
+            aTHX_ &view
+        );
+        RETVAL = (UV)size;
+    OUTPUT:
+        RETVAL
+
+UV
+uniform_trailer_field_section_size(self, message)
+    SV *self
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        size_t size;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        (void)native;
+
+        unblock_http3_uniform_any_view(
+            aTHX_ message,
+            &view
+        );
+
+        unblock_http3_uniform_validate_section(
+            aTHX_ &view.trailers,
+            2
+        );
+        size = unblock_http3_uniform_section_size(
+            aTHX_ &view.trailers
+        );
+        RETVAL = (UV)size;
+    OUTPUT:
+        RETVAL
+
+void
+submit_uniform_request(self, stream_id, message, streaming = 0)
+    SV *self
+    IV stream_id
+    SV *message
+    IV streaming
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        unblock_http3_uniform_fields headers;
+        unblock_http3_uniform_fields trailers;
+        unblock_http3_body *body_ctx;
+        const nghttp3_data_reader *reader;
+        Size_t trailer_count;
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_REQUEST,
+            &view
+        );
+        unblock_http3_uniform_request_fields(
+            aTHX_ &view,
+            &headers
+        );
+        unblock_http3_uniform_trailer_fields(
+            aTHX_ &view,
+            &trailers
+        );
+        trailer_count = uhttp_native_field_count(
+            aTHX_ &view.trailers
+        );
+        body_ctx = NULL;
+        reader = NULL;
+
+        if (
+            (view.flags & UHTTP_HAS_BUFFERED_BODY)
+            || streaming
+            || trailer_count != 0
+        ) {
+            body_ctx = unblock_http3_body_create(
+                native,
+                (int64_t)stream_id,
+                streaming ? 1 : 0
+            );
+
+            if (view.flags & UHTTP_HAS_BUFFERED_BODY) {
+                unblock_http3_body_append(
+                    native,
+                    body_ctx,
+                    view.body
+                );
+            }
+
+            if (!streaming) {
+                body_ctx->eof = 1;
+            }
+
+            reader = &unblock_http3_body_reader;
+        }
+
+        rv = nghttp3_conn_submit_request(
+            native->conn,
+            (int64_t)stream_id,
+            headers.nva,
+            headers.nvlen,
+            reader,
+            body_ctx
+        );
+
+        unblock_http3_uniform_fields_free(&headers);
+
+        if (rv != 0) {
+            unblock_http3_uniform_fields_free(&trailers);
+            if (body_ctx != NULL) {
+                unblock_http3_body_remove(
+                    native,
+                    (int64_t)stream_id
+                );
+            }
+            unblock_http3_fail("could not submit HTTP/3 request", rv);
+        }
+
+        if (trailers.nvlen != 0) {
+            rv = nghttp3_conn_submit_trailers(
+                native->conn,
+                (int64_t)stream_id,
+                trailers.nva,
+                trailers.nvlen
+            );
+
+            unblock_http3_uniform_fields_free(&trailers);
+
+            if (rv != 0) {
+                unblock_http3_fail(
+                    "could not submit HTTP/3 request trailers",
+                    rv
+                );
+            }
+        } else {
+            unblock_http3_uniform_fields_free(&trailers);
+        }
+
+void
+submit_uniform_info(self, stream_id, message)
+    SV *self
+    IV stream_id
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        unblock_http3_uniform_fields fields;
+        char status_buffer[4];
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_RESPONSE,
+            &view
+        );
+        unblock_http3_uniform_response_fields(
+            aTHX_ &view,
+            &fields,
+            status_buffer
+        );
+
+        rv = nghttp3_conn_submit_info(
+            native->conn,
+            (int64_t)stream_id,
+            fields.nva,
+            fields.nvlen
+        );
+
+        unblock_http3_uniform_fields_free(&fields);
+
+        if (rv != 0) {
+            unblock_http3_fail(
+                "could not submit HTTP/3 informational response",
+                rv
+            );
+        }
+
+void
+submit_uniform_response(self, stream_id, message, streaming = 0)
+    SV *self
+    IV stream_id
+    SV *message
+    IV streaming
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        unblock_http3_uniform_fields headers;
+        unblock_http3_uniform_fields trailers;
+        unblock_http3_body *body_ctx;
+        const nghttp3_data_reader *reader;
+        Size_t trailer_count;
+        char status_buffer[4];
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_RESPONSE,
+            &view
+        );
+        unblock_http3_uniform_response_fields(
+            aTHX_ &view,
+            &headers,
+            status_buffer
+        );
+        unblock_http3_uniform_trailer_fields(
+            aTHX_ &view,
+            &trailers
+        );
+        trailer_count = uhttp_native_field_count(
+            aTHX_ &view.trailers
+        );
+        body_ctx = NULL;
+        reader = NULL;
+
+        if (
+            (view.flags & UHTTP_HAS_BUFFERED_BODY)
+            || streaming
+            || trailer_count != 0
+        ) {
+            body_ctx = unblock_http3_body_create(
+                native,
+                (int64_t)stream_id,
+                streaming ? 1 : 0
+            );
+
+            if (view.flags & UHTTP_HAS_BUFFERED_BODY) {
+                unblock_http3_body_append(
+                    native,
+                    body_ctx,
+                    view.body
+                );
+            }
+
+            if (!streaming) {
+                body_ctx->eof = 1;
+            }
+
+            reader = &unblock_http3_body_reader;
+
+            rv = nghttp3_conn_set_stream_user_data(
+                native->conn,
+                (int64_t)stream_id,
+                body_ctx
+            );
+
+            if (rv != 0) {
+                unblock_http3_uniform_fields_free(&headers);
+                unblock_http3_uniform_fields_free(&trailers);
+                unblock_http3_body_remove(
+                    native,
+                    (int64_t)stream_id
+                );
+                unblock_http3_fail(
+                    "could not attach HTTP/3 response body",
+                    rv
+                );
+            }
+        }
+
+        rv = nghttp3_conn_submit_response(
+            native->conn,
+            (int64_t)stream_id,
+            headers.nva,
+            headers.nvlen,
+            reader
+        );
+
+        unblock_http3_uniform_fields_free(&headers);
+
+        if (rv != 0) {
+            unblock_http3_uniform_fields_free(&trailers);
+            if (body_ctx != NULL) {
+                unblock_http3_body_remove(
+                    native,
+                    (int64_t)stream_id
+                );
+            }
+            unblock_http3_fail("could not submit HTTP/3 response", rv);
+        }
+
+        if (trailers.nvlen != 0) {
+            rv = nghttp3_conn_submit_trailers(
+                native->conn,
+                (int64_t)stream_id,
+                trailers.nva,
+                trailers.nvlen
+            );
+
+            unblock_http3_uniform_fields_free(&trailers);
+
+            if (rv != 0) {
+                unblock_http3_fail(
+                    "could not submit HTTP/3 response trailers",
+                    rv
+                );
+            }
+        } else {
+            unblock_http3_uniform_fields_free(&trailers);
+        }
+
 void
 submit_request(self, stream_id, fields, body = &PL_sv_undef, streaming = 0)
     SV *self
@@ -1815,6 +3749,7 @@ DESTROY(self)
             }
 
             unblock_http3_body_free_all(native);
+            unblock_http3_header_block_free_all(native);
             Safefree(native);
             sv_setiv(SvRV(self), 0);
         }

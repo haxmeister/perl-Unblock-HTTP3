@@ -6,8 +6,8 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
-use Uniform::HTTP::Request 0.05 ();
-use Uniform::HTTP::Response 0.05 ();
+use Uniform::HTTP::Request 0.06 ();
+use Uniform::HTTP::Response 0.06 ();
 
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::_Native ();

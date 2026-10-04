@@ -298,6 +298,27 @@ measure(
         );
     },
 );
+
+my $uniform_native = Unblock::HTTP3::_Native->client(
+    65_536,
+    0,
+    0,
+    0,
+    0,
+);
+
+$uniform_native->bind_streams(2, 6, 10);
+drain_native($uniform_native);
+
+measure(
+    'Native Uniform field sizing',
+    $iterations,
+    sub {
+        $sink = $uniform_native->uniform_request_field_section_size(
+            $request,
+        );
+    },
+);
 my $native = Unblock::HTTP3::_Native->client(
     65_536,
     0,
@@ -326,7 +347,109 @@ measure(
     },
 );
 
+my $uniform_stream_id = 0;
+my $uniform_native_wire_bytes = 0;
+
+measure(
+    'Native Uniform request submission',
+    $native_iterations,
+    sub {
+        $uniform_native->submit_uniform_request(
+            $uniform_stream_id,
+            $request,
+            0,
+        );
+
+        $uniform_native_wire_bytes += drain_native($uniform_native);
+        $uniform_stream_id += 4;
+    },
+);
+
+my $perl_pipeline_native = Unblock::HTTP3::_Native->client(
+    65_536,
+    0,
+    0,
+    0,
+    0,
+);
+$perl_pipeline_native->bind_streams(2, 6, 10);
+drain_native($perl_pipeline_native);
+
+my $uniform_pipeline_native = Unblock::HTTP3::_Native->client(
+    65_536,
+    0,
+    0,
+    0,
+    0,
+);
+$uniform_pipeline_native->bind_streams(2, 6, 10);
+drain_native($uniform_pipeline_native);
+
+my $perl_pipeline_stream_id = 0;
+my $uniform_pipeline_stream_id = 0;
+
+measure(
+    'Former Perl FastPath pipeline',
+    $native_iterations,
+    sub {
+        my $view = Uniform::HTTP::FastPath::view($request);
+        my $fields = [
+            [ ':method', $view->[Uniform::HTTP::FastPath::SLOT_METHOD()] ],
+            [ ':scheme', $view->[Uniform::HTTP::FastPath::SLOT_SCHEME()] ],
+            [ ':authority', $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()] ],
+            [ ':path', $view->[Uniform::HTTP::FastPath::SLOT_TARGET()] ],
+            @{
+                Unblock::HTTP3::Connection::_wire_headers(
+                    $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
+                    'request',
+                )
+            },
+        ];
+
+        Unblock::HTTP3::Connection::_assert_peer_field_section_size(
+            $limit_state,
+            $fields,
+            'benchmark',
+        );
+
+        $perl_pipeline_native->submit_request(
+            $perl_pipeline_stream_id,
+            $fields,
+        );
+        drain_native($perl_pipeline_native);
+        $perl_pipeline_stream_id += 4;
+    },
+);
+
+measure(
+    'Native Uniform pipeline',
+    $native_iterations,
+    sub {
+        my $size =
+            $uniform_pipeline_native->uniform_request_field_section_size(
+                $request,
+            );
+
+        Unblock::HTTP3::Connection::_assert_peer_field_section_size_value(
+            $limit_state,
+            $size,
+            'benchmark',
+        );
+
+        $uniform_pipeline_native->submit_uniform_request(
+            $uniform_pipeline_stream_id,
+            $request,
+            0,
+        );
+        drain_native($uniform_pipeline_native);
+        $uniform_pipeline_stream_id += 4;
+    },
+);
+
 print "\n";
 print "native_wire_bytes=$native_wire_bytes\n";
 printf "native_wire_bytes_per_request=%.2f\n",
     $native_wire_bytes / $native_iterations;
+print "uniform_native_wire_bytes=$uniform_native_wire_bytes\n";
+printf "uniform_native_wire_bytes_per_request=%.2f\n",
+    $uniform_native_wire_bytes / $native_iterations;

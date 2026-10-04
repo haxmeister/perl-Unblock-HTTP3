@@ -419,105 +419,51 @@ is(
     'CONNECT target and authority compare host case-insensitively',
 );
 
-{
-    package Local::RejectingConnection;
-    our @ISA = ('Unblock::HTTP3::Connection');
-
-    sub _reject_message_stream {
-        my ($self, $id, $reason) = @_;
-        $self->{rejected} = [ $id, $reason ];
-        return;
-    }
-}
-
-my $incoming = bless {
-    role => 'server',
-    building => {
-        0 => {
-            pseudo => {
-                ':method'    => 'GET',
-                ':scheme'    => 'https',
-                ':authority' => 'example.com',
-                ':path'      => '/',
-            },
-            headers => [
-                [ host => 'other.example' ],
-            ],
-        },
-    },
-}, 'Local::RejectingConnection';
-
-$incoming->_finish_headers(0, 1);
-
-is(
-    $incoming->{rejected}[0],
-    0,
-    'incoming Host mismatch rejects only the request stream',
-);
+my $incoming_host_error =
+    Unblock::HTTP3::Connection::_request_semantic_error(
+        method      => 'GET',
+        scheme      => 'https',
+        authority   => 'example.com',
+        target      => '/',
+        protocol    => undef,
+        host_values => [ 'other.example' ],
+    );
 
 like(
-    $incoming->{rejected}[1],
+    $incoming_host_error,
     qr/Host field must match :authority/,
     'incoming Host mismatch uses the shared semantic validation',
 );
 
-my $missing_extended_path = bless {
-    role                    => 'server',
-    enable_extended_connect => 1,
-    building => {
-        4 => {
-            pseudo => {
-                ':method'    => 'CONNECT',
-                ':protocol'  => 'test-protocol',
-                ':scheme'    => 'https',
-                ':authority' => 'example.com',
-            },
-            headers => [],
-        },
-    },
-}, 'Local::RejectingConnection';
-
-$missing_extended_path->_finish_headers(4, 0);
-
-is(
-    $missing_extended_path->{rejected}[0],
-    4,
-    'Extended CONNECT missing :path rejects only the request stream',
-);
+my $missing_extended_path_error =
+    Unblock::HTTP3::Connection::_request_semantic_error(
+        method      => 'CONNECT',
+        scheme      => 'https',
+        authority   => 'example.com',
+        target      => undef,
+        protocol    => 'test-protocol',
+        host_values => [],
+    );
 
 like(
-    $missing_extended_path->{rejected}[1],
+    $missing_extended_path_error,
     qr/Extended CONNECT requires :path/,
     'missing Extended CONNECT :path has a useful rejection reason',
 );
 
-my $missing_extended_scheme = bless {
-    role                    => 'server',
-    enable_extended_connect => 1,
-    building => {
-        8 => {
-            pseudo => {
-                ':method'    => 'CONNECT',
-                ':protocol'  => 'test-protocol',
-                ':authority' => 'example.com',
-                ':path'      => '/extended',
-            },
-            headers => [],
-        },
-    },
-}, 'Local::RejectingConnection';
-
-$missing_extended_scheme->_finish_headers(8, 0);
-
-is(
-    $missing_extended_scheme->{rejected}[0],
-    8,
-    'Extended CONNECT missing :scheme rejects only the request stream',
-);
+my $missing_extended_scheme_error =
+    Unblock::HTTP3::Connection::_request_semantic_error(
+        method      => 'CONNECT',
+        scheme      => undef,
+        authority   => 'example.com',
+        target      => '/extended',
+        protocol    => 'test-protocol',
+        host_values => [],
+    );
 
 like(
-    $missing_extended_scheme->{rejected}[1],
-    qr/requires :scheme/,
+    $missing_extended_scheme_error,
+    qr/Extended CONNECT requires :scheme/,
     'missing Extended CONNECT :scheme uses shared semantic validation',
 );
 

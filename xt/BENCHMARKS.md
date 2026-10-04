@@ -77,14 +77,26 @@ The microbenchmark removes UDP, TLS, QUIC, and event driving from the timed
 loop. It reports the major HTTP-layer costs separately:
 
 - construction of a representative canonical Uniform::HTTP::Request
-- construction of its Uniform::HTTP::FastPath ABI view
+- construction of its Uniform::HTTP::FastPath ABI view for comparison
 - legacy accessor-based wire-field preparation for comparison
-- current FastPath HTTP/3 pseudo-header and normal wire-field preparation
-- native libnghttp3 request submission and serialization
+- former Perl FastPath HTTP/3 pseudo-header and wire-field preparation
+- native Uniform field-section sizing from a canonical Request
+- native libnghttp3 submission from prebuilt field arrays
+- native libnghttp3 submission directly from a canonical Uniform Request
 
 Run it with:
 
     perl -Iblib/lib -Iblib/arch xt/benchmark-http3-micro.pl
+
+The native Uniform cases exercise the Uniform::HTTP 0.06 header-only FastPath
+compiled into Unblock::HTTP3. They measure the current canonical-object boundary
+without constructing a Perl FastPath view or temporary HTTP/3 field arrays.
+
+The benchmark also compares the complete former Perl FastPath pipeline with
+the complete native Uniform pipeline. Each combined case includes field
+preparation, peer field-section limit checking, libnghttp3 submission, and
+serialization/draining, so it is the preferred microbenchmark for evaluating
+this integration.
 
 The native case disables QPACK dynamic-table capacity so it measures a stable
 literal/static-table submission path without requiring a peer decoder stream.

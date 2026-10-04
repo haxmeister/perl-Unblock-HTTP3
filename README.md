@@ -47,7 +47,7 @@ Unblock::HTTP3 0.02 requires:
 Perl            5.20+
 Alien::nghttp3  0.01+
 Net::QUIC       0.04+
-Uniform::HTTP   0.05+
+Uniform::HTTP   0.06+
 ```
 
 ## Start here

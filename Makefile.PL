@@ -3,8 +3,10 @@ use warnings;
 
 use Alien::nghttp3 0.01 ();
 use ExtUtils::MakeMaker;
+use Uniform::HTTP::FastPath 0.06 ();
 
 my $cflags = Alien::nghttp3->cflags;
+my $uniform_http_include = Uniform::HTTP::FastPath::native_include_dir();
 
 sub _makemaker_libs {
     my ($flags) = @_;
@@ -42,6 +44,7 @@ WriteMakefile(
     CONFIGURE_REQUIRES => {
         'Alien::nghttp3'       => '0.01',
         'ExtUtils::MakeMaker'  => 0,
+        'Uniform::HTTP'         => '0.06',
     },
 
     PREREQ_PM => {
@@ -50,7 +53,7 @@ WriteMakefile(
         'Net::QUIC'      => '0.04',
         'Scalar::Util'    => 0,
         'Time::HiRes'     => 0,
-        'Uniform::HTTP'    => '0.05',
+        'Uniform::HTTP'    => '0.06',
         'XSLoader'        => 0,
         'parent'          => 0,
     },
@@ -63,7 +66,7 @@ WriteMakefile(
         'Test2::V0'        => 0,
     },
 
-    INC  => $cflags,
+    INC  => join(' ', $cflags, qq(-I"$uniform_http_include")),
     LIBS => [$libs],
 
     META_MERGE => {

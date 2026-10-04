@@ -3,9 +3,8 @@ package Unblock::HTTP3::Connection;
 use strict;
 use warnings;
 use Carp qw(croak);
-use Uniform::HTTP::FastPath 0.05 ();
-use Uniform::HTTP::Request 0.05 ();
-use Uniform::HTTP::Response 0.05 ();
+use Uniform::HTTP::Request 0.06 ();
+use Uniform::HTTP::Response 0.06 ();
 use Scalar::Util qw(blessed weaken);
 use Time::HiRes ();
 
@@ -1878,26 +1877,14 @@ sub _send_informational_response {
         'send_informational()',
     );
 
-    my $view = Uniform::HTTP::FastPath::view($response);
-    my @fields = (
-        [
-            ':status',
-            "" . $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
-        ],
-        @{ _wire_headers(
-            $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
-            'response',
-        ) },
-    );
-
-    $self->_assert_peer_field_section_size(
-        \@fields,
+    $self->_assert_peer_field_section_size_value(
+        $self->{native}->uniform_response_field_section_size($response),
         'send_informational()',
     );
 
-    $self->{native}->submit_info(
+    $self->{native}->submit_uniform_info(
         $transaction->stream_id,
-        \@fields,
+        $response,
     );
 
     $response->freeze;
@@ -1928,14 +1915,11 @@ sub _capsule_protocol_response_error {
 sub _assert_capsule_protocol_response {
     my ($response, $operation) = @_;
 
-    my $view = Uniform::HTTP::FastPath::view($response);
-    my $error = _capsule_protocol_response_error(
-        $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
-        $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
-    );
+    my $values = $response->header_values('capsule-protocol');
+    return unless @$values;
+    return if $response->status >= 200 && $response->status < 300;
 
-    croak "$operation: $error" if defined $error;
-    return;
+    croak "$operation: Capsule-Protocol is only valid on a successful HTTP/3 response";
 }
 
 sub _response_content_forbidden_reason {
@@ -2549,6 +2533,7 @@ sub _reject_message_stream {
     }
 
     $self->{native}->discard_body($id);
+    $self->{native}->discard_header_block($id);
     return;
 }
 
@@ -2586,7 +2571,6 @@ sub _cleanup_stream_if_done {
     delete $self->{messages}{$id};
     delete $self->{outgoing}{$id};
     delete $self->{stream_lifecycle}{$id};
-    delete $self->{building}{$id};
     delete $self->{trailer_field_section_size}{$id};
     delete $self->{output_finished}{$id};
     delete $self->{response_sent}{$id};
@@ -2841,7 +2825,6 @@ sub _rollback_rejected_early_data {
     $self->{messages} = {};
     $self->{outgoing} = {};
     $self->{stream_lifecycle} = {};
-    $self->{building} = {};
     $self->{trailer_field_section_size} = {};
     $self->{output_finished} = {};
     $self->{response_sent} = {};
@@ -3341,8 +3324,7 @@ sub _service_stream {
             $self->{native}->discard_body($id);
             delete $self->{streams}{$id};
             delete $self->{stream_lifecycle}{$id};
-            delete $self->{building}{$id};
-            delete $self->{rejected_streams}{$id};
+                    delete $self->{rejected_streams}{$id};
         }
 
         return;
@@ -3529,25 +3511,11 @@ sub _drain_events {
             next;
         }
 
-        if ($type eq 'begin_headers') {
-            $self->{building}{$id} = {
-                pseudo             => {},
-                headers            => [],
-                field_section_size => 0,
-            };
-            next;
-        }
-
-        if ($type eq 'header') {
-            my ($name, $value) = @args;
-            my $building = $self->{building}{$id}
-                or croak "received HTTP/3 header without a header section";
-
-            $building->{field_section_size}
-                += length($name) + length($value) + 32;
+        if ($type eq 'headers') {
+            my ($field_section_size, $fin) = @args;
 
             if (
-                $building->{field_section_size}
+                $field_section_size
                 > $self->{max_field_section_size}
             ) {
                 $self->_fail_connection(
@@ -3557,17 +3525,10 @@ sub _drain_events {
                 next;
             }
 
-            if (substr($name, 0, 1) eq ':') {
-                $building->{pseudo}{$name} = $value;
-            } else {
-                push @{ $building->{headers} }, [ $name, $value ];
-            }
-
-            next;
-        }
-
-        if ($type eq 'end_headers') {
-            $self->_finish_headers($id, $args[0] ? 1 : 0);
+            $self->_finish_headers(
+                $id,
+                $fin ? 1 : 0,
+            );
             next;
         }
 
@@ -3738,38 +3699,6 @@ sub _drain_events {
     return;
 }
 
-sub _coalesce_cookie_fields {
-    my ($fields) = @_;
-
-    my @cookie_values = map {
-        $_->[1]
-    } grep {
-        $_->[0] eq 'cookie'
-    } @$fields;
-
-    return $fields if @cookie_values < 2;
-
-    my @normalized;
-    my $inserted;
-
-    for my $field (@$fields) {
-        if ($field->[0] eq 'cookie') {
-            if (!$inserted) {
-                push @normalized, [
-                    'cookie',
-                    join('; ', @cookie_values),
-                ];
-                $inserted = 1;
-            }
-            next;
-        }
-
-        push @normalized, $field;
-    }
-
-    return \@normalized;
-}
-
 sub _coalesce_trailer_cookie_fields {
     my ($message) = @_;
 
@@ -3784,123 +3713,50 @@ sub _coalesce_trailer_cookie_fields {
     return 1;
 }
 
-sub _received_message_flags {
-    my ($kind, $fin) = @_;
-
-    my $flags =
-        Uniform::HTTP::FastPath::FLAG_HEADERS_LOSSLESS()
-        | Uniform::HTTP::FastPath::FLAG_TRAILERS_LOSSLESS();
-
-    $flags |= Uniform::HTTP::FastPath::FLAG_TARGET_EXACT()
-        if $kind eq 'request';
-
-    if ($fin) {
-        $flags |= Uniform::HTTP::FastPath::FLAG_COMPLETE();
-    } else {
-        $flags |= Uniform::HTTP::FastPath::FLAG_MUTABLE()
-            | Uniform::HTTP::FastPath::FLAG_BODY_MUTABLE()
-            | Uniform::HTTP::FastPath::FLAG_TRAILERS_MUTABLE();
-    }
-
-    return $flags;
-}
-
-sub _received_request {
-    my ($args, $fin) = @_;
-
-    my $view = [
-        Uniform::HTTP::FastPath::ABI_VERSION(),
-        Uniform::HTTP::FastPath::KIND_REQUEST(),
-        _received_message_flags('request', $fin),
-        '3',
-        $args->{method},
-        $args->{target},
-        $args->{scheme},
-        $args->{authority},
-        $args->{protocol},
-        undef,
-        undef,
-        _coalesce_cookie_fields($args->{headers}),
-        [],
-        undef,
-    ];
-
-    return Uniform::HTTP::FastPath::request_from_validated($view);
-}
-
-sub _received_response {
-    my ($status, $headers, $fin) = @_;
-
-    my $view = [
-        Uniform::HTTP::FastPath::ABI_VERSION(),
-        Uniform::HTTP::FastPath::KIND_RESPONSE(),
-        _received_message_flags('response', $fin),
-        '3',
-        undef,
-        undef,
-        undef,
-        undef,
-        undef,
-        $status,
-        undef,
-        _coalesce_cookie_fields($headers),
-        [],
-        undef,
-    ];
-
-    return Uniform::HTTP::FastPath::response_from_validated($view);
-}
-
 sub _finish_headers {
     my ($self, $id, $fin) = @_;
 
-    my $building = delete $self->{building}{$id}
-        or croak 'HTTP/3 header section ended without beginning';
-
-    my $pseudo = $building->{pseudo};
     my $message;
 
     if ($self->{role} eq 'server') {
-        croak 'HTTP/3 request is missing :method'
-            unless defined $pseudo->{':method'};
+        my $method = $self->{native}->header_pseudo($id, ':method');
 
-        my $is_connect = $pseudo->{':method'} eq 'CONNECT' ? 1 : 0;
-        my $protocol = exists($pseudo->{':protocol'})
-            ? $pseudo->{':protocol'}
-            : undef;
+        croak 'HTTP/3 request is missing :method'
+            unless defined $method;
+
+        my $scheme = $self->{native}->header_pseudo($id, ':scheme');
+        my $authority = $self->{native}->header_pseudo($id, ':authority');
+        my $path = $self->{native}->header_pseudo($id, ':path');
+        my $protocol = $self->{native}->header_pseudo($id, ':protocol');
+        my $is_connect = $method eq 'CONNECT' ? 1 : 0;
         my $is_extended_connect =
             $is_connect && defined($protocol) ? 1 : 0;
-        my %args;
+        my $target;
+        my $host_values = $self->{native}->header_values($id, 'host');
 
         if ($is_connect && !$is_extended_connect) {
             croak 'HTTP/3 CONNECT request is missing :authority'
-                unless defined $pseudo->{':authority'};
+                unless defined $authority;
             croak 'HTTP/3 CONNECT request must not contain :scheme'
-                if exists $pseudo->{':scheme'};
+                if defined $scheme;
             croak 'HTTP/3 CONNECT request must not contain :path'
-                if exists $pseudo->{':path'};
+                if defined $path;
+
+            $target = $authority;
 
             my $semantic_error = _request_semantic_error(
                 method      => 'CONNECT',
                 scheme      => undef,
-                authority   => $pseudo->{':authority'},
-                target      => $pseudo->{':authority'},
+                authority   => $authority,
+                target      => $target,
                 protocol    => undef,
-                host_values => _request_host_values($building->{headers}),
+                host_values => $host_values,
             );
 
             if (defined $semantic_error) {
                 $self->_reject_message_stream($id, $semantic_error);
                 return;
             }
-
-            %args = (
-                method    => 'CONNECT',
-                target    => $pseudo->{':authority'},
-                authority => $pseudo->{':authority'},
-                version   => '3',
-                headers   => $building->{headers},
-            );
         } else {
             if ($is_extended_connect && !$self->{enable_extended_connect}) {
                 $self->_reject_message_stream(
@@ -3910,7 +3766,7 @@ sub _finish_headers {
                 return;
             }
 
-            if ($is_extended_connect && !defined $pseudo->{':path'}) {
+            if ($is_extended_connect && !defined $path) {
                 $self->_reject_message_stream(
                     $id,
                     'Extended CONNECT requires :path',
@@ -3919,28 +3775,15 @@ sub _finish_headers {
             }
 
             croak 'HTTP/3 request is missing :path'
-                unless defined $pseudo->{':path'};
+                unless defined $path;
 
-            %args = (
-                method  => $pseudo->{':method'},
-                target  => $pseudo->{':path'},
-                version => '3',
-                headers => $building->{headers},
-            );
+            $target = $path;
 
-            $args{scheme} = $pseudo->{':scheme'}
-                if exists $pseudo->{':scheme'};
-            $args{authority} = $pseudo->{':authority'}
-                if exists $pseudo->{':authority'};
-            $args{protocol} = $protocol
-                if defined $protocol;
-
-            my $host_values = _request_host_values($building->{headers});
             my $semantic_error = _request_semantic_error(
-                method      => $pseudo->{':method'},
-                scheme      => $pseudo->{':scheme'},
-                authority   => $pseudo->{':authority'},
-                target      => $pseudo->{':path'},
+                method      => $method,
+                scheme      => $scheme,
+                authority   => $authority,
+                target      => $target,
                 protocol    => $protocol,
                 host_values => $host_values,
             );
@@ -3950,12 +3793,20 @@ sub _finish_headers {
                 return;
             }
 
-            if (!exists($args{authority}) && @$host_values == 1) {
-                $args{authority} = $host_values->[0];
+            if (!defined($authority) && @$host_values == 1) {
+                $authority = $host_values->[0];
             }
         }
 
-        $message = _received_request(\%args, $fin);
+        $message = $self->{native}->receive_uniform_request(
+            $id,
+            $method,
+            $target,
+            $scheme,
+            $authority,
+            $protocol,
+            $fin,
+        );
 
         my $response = Uniform::HTTP::Response->new(
             status  => 200,
@@ -4011,22 +3862,25 @@ sub _finish_headers {
             push @{ $self->{ready_transactions} }, $transaction;
         }
     } else {
+        my $status = $self->{native}->header_pseudo($id, ':status');
+
         croak 'HTTP/3 response is missing :status'
-            unless defined $pseudo->{':status'};
+            unless defined $status;
 
-        my $capsule_error = _capsule_protocol_response_error(
-            0 + $pseudo->{':status'},
-            $building->{headers},
-        );
-
-        if (defined $capsule_error) {
-            $self->_reject_message_stream($id, $capsule_error);
+        if (
+            $self->{native}->has_header($id, 'capsule-protocol')
+            && !(0 + $status >= 200 && 0 + $status < 300)
+        ) {
+            $self->_reject_message_stream(
+                $id,
+                'Capsule-Protocol is only valid on a successful HTTP/3 response',
+            );
             return;
         }
 
-        $message = _received_response(
-            $pseudo->{':status'},
-            $building->{headers},
+        $message = $self->{native}->receive_uniform_response(
+            $id,
+            0 + $status,
             $fin,
         );
 
@@ -4138,10 +3992,9 @@ sub _field_section_size {
     return $size;
 }
 
-sub _assert_peer_field_section_size {
-    my ($self, $fields, $operation) = @_;
+sub _assert_peer_field_section_size_value {
+    my ($self, $size, $operation) = @_;
 
-    my $size = _field_section_size($fields);
     my $limit = $self->{peer_max_field_section_size};
 
     croak "$operation: field section size $size exceeds peer "
@@ -4149,6 +4002,16 @@ sub _assert_peer_field_section_size {
         if _decimal_less_than($limit, $size);
 
     return $size;
+}
+
+sub _assert_peer_field_section_size {
+    my ($self, $fields, $operation) = @_;
+
+    return _assert_peer_field_section_size_value(
+        $self,
+        _field_section_size($fields),
+        $operation,
+    );
 }
 
 sub _wire_headers {
@@ -4207,79 +4070,23 @@ sub _submit_request {
         unless $self->{started};
     croak 'request must be a canonical Uniform::HTTP::Request'
         unless ref($request) eq 'Uniform::HTTP::Request';
-
-    my $view = Uniform::HTTP::FastPath::view($request);
-    my $method = $view->[Uniform::HTTP::FastPath::SLOT_METHOD()];
-    my $target = $view->[Uniform::HTTP::FastPath::SLOT_TARGET()];
-    my $scheme = $view->[Uniform::HTTP::FastPath::SLOT_SCHEME()];
-    my $authority = $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()];
-    my $protocol = $view->[Uniform::HTTP::FastPath::SLOT_PROTOCOL()];
-    my $headers = $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()];
-    my $trailers = $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()];
-    my $flags = $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()];
-
-    my $is_connect = $method eq 'CONNECT' ? 1 : 0;
-    my $is_extended_connect =
-        $is_connect && defined($protocol) ? 1 : 0;
-
-    if ($is_connect) {
-        croak 'HTTP/3 CONNECT request requires authority'
-            unless defined $authority;
-        croak 'HTTP/3 peer did not enable Extended CONNECT'
-            if $is_extended_connect
-                && !$self->{peer_enable_connect_protocol};
-    } else {
-        croak 'HTTP/3 request requires scheme'
-            unless defined $scheme;
-        croak 'HTTP/3 request requires authority'
-            unless defined $authority;
-    }
     croak 'HTTP/3 peer has begun graceful shutdown'
         if defined $self->{remote_shutdown_id};
     croak 'HTTP/3 connection is shutting down'
         if $self->{shutdown_notice_sent} || $self->{shutdown_started};
 
-    my $wire_headers = _wire_headers($headers, 'request');
-    my @fields;
-
-    if ($is_extended_connect) {
-        @fields = (
-            [ ':method',    'CONNECT' ],
-            [ ':protocol',  $protocol ],
-            [ ':scheme',    $scheme ],
-            [ ':authority', $authority ],
-            [ ':path',      $target ],
-            @$wire_headers,
-        );
-    } elsif ($is_connect) {
-        @fields = (
-            [ ':method',    'CONNECT' ],
-            [ ':authority', $authority ],
-            @$wire_headers,
-        );
-    } else {
-        @fields = (
-            [ ':method',    $method ],
-            [ ':scheme',    $scheme ],
-            [ ':authority', $authority ],
-            [ ':path',      $target ],
-            @$wire_headers,
-        );
-    }
-
-    $self->_assert_peer_field_section_size(
-        \@fields,
+    $self->_assert_peer_field_section_size_value(
+        $self->{native}->uniform_request_field_section_size($request),
         'request()',
     );
 
-    my $wire_trailers = @$trailers
-        ? _wire_trailers($trailers)
-        : undef;
+    my $trailer_size =
+        $self->{native}->uniform_trailer_field_section_size($request);
 
-    $self->_assert_peer_field_section_size(
-        $wire_trailers,
+    $self->_assert_peer_field_section_size_value(
+        $trailer_size,
         'request trailers',
-    ) if defined $wire_trailers;
+    ) if $trailer_size;
 
     my $stream = $self->{quic}->open_bidi_stream;
     return unless defined $stream;
@@ -4288,24 +4095,12 @@ sub _submit_request {
     $self->{streams}{$id} = $stream;
 
     $streaming = $streaming ? 1 : 0;
-    my $wire_body =
-        $flags & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()
-            ? $view->[Uniform::HTTP::FastPath::SLOT_BODY()]
-            : (!$streaming && @$trailers ? '' : undef);
 
-    $self->{native}->submit_request(
+    $self->{native}->submit_uniform_request(
         $id,
-        \@fields,
-        $wire_body,
+        $request,
         $streaming,
     );
-
-    if (defined $wire_trailers) {
-        $self->{native}->submit_trailers(
-            $id,
-            $wire_trailers,
-        );
-    }
 
     $request->freeze;
     $self->{outgoing}{$id} = $request;
@@ -4327,62 +4122,34 @@ sub _submit_response {
     croak 'unknown HTTP/3 request stream'
         unless defined $self->{streams}{$stream_id};
 
-    my $view = Uniform::HTTP::FastPath::view($response);
-    my $headers = $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()];
-    my $trailers = $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()];
-    my $flags = $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()];
-
-    my @fields = (
-        [
-            ':status',
-            "" . $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
-        ],
-        @{ _wire_headers($headers, 'response') },
-    );
-
-    $self->_assert_peer_field_section_size(
-        \@fields,
+    $self->_assert_peer_field_section_size_value(
+        $self->{native}->uniform_response_field_section_size($response),
         'send_response()',
     );
 
-    my $wire_trailers = @$trailers
-        ? _wire_trailers($trailers)
-        : undef;
+    my $trailer_size =
+        $self->{native}->uniform_trailer_field_section_size($response);
 
-    $self->_assert_peer_field_section_size(
-        $wire_trailers,
+    $self->_assert_peer_field_section_size_value(
+        $trailer_size,
         'response trailers',
-    ) if defined $wire_trailers;
+    ) if $trailer_size;
 
     my $transaction = $self->{transactions}{$stream_id};
     my $streaming = defined($transaction)
         && $transaction->_response_is_streaming
         ? 1
         : 0;
-    my $wire_body =
-        $flags & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()
-            ? $view->[Uniform::HTTP::FastPath::SLOT_BODY()]
-            : (!$streaming && @$trailers ? '' : undef);
 
-    $self->{native}->submit_response(
+    $self->{native}->submit_uniform_response(
         $stream_id,
-        \@fields,
-        $wire_body,
+        $response,
         $streaming,
     );
 
-    if (defined $wire_trailers) {
-        $self->{native}->submit_trailers(
-            $stream_id,
-            $wire_trailers,
-        );
-    }
-
     $response->freeze;
-    $self->{outgoing}{$stream_id} = $response;
 
     $self->_drain_output;
-
     return $response;
 }
 
