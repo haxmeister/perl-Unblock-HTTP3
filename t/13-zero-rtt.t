@@ -82,6 +82,8 @@ my $server_driver = Net::QUIC::Driver->server(
     },
 );
 
+$server_driver->start;
+
 my @clients;
 my $selector = IO::Select->new($server_socket);
 
@@ -116,6 +118,8 @@ sub new_client {
         if defined $args{early_data};
 
     my $driver = Net::QUIC::Driver->client(%driver_args);
+    $driver->start;
+
     my $entry = {
         socket       => $socket,
         local        => $local,
