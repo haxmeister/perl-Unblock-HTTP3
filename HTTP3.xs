@@ -1,12 +1,19 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "uniform_http_fastpath.h"
 
 #include <nghttp3/nghttp3.h>
 
 #include <inttypes.h>
 
 #define UNBLOCK_HTTP3_MAX_VARINT UINT64_C(0x3fffffffffffffff)
+
+typedef struct {
+    uhttp_native_api uniform_api;
+} my_cxt_t;
+
+START_MY_CXT
 
 typedef struct unblock_http3_body_chunk {
     SV *storage;
@@ -915,6 +922,629 @@ unblock_http3_new_conn(
     return unblock_http3_bless_conn(native);
 }
 
+
+typedef struct {
+    nghttp3_nv *nva;
+    uint8_t **owned_names;
+    size_t nvlen;
+} unblock_http3_uniform_fields;
+
+static int
+unblock_http3_bytes_equal(
+    const uint8_t *left,
+    size_t left_len,
+    const char *right
+)
+{
+    size_t right_len = strlen(right);
+
+    return left_len == right_len
+        && memcmp(left, right, right_len) == 0;
+}
+
+static int
+unblock_http3_ascii_equal_ci(
+    const uint8_t *left,
+    size_t left_len,
+    const char *right
+)
+{
+    size_t i;
+    size_t right_len = strlen(right);
+
+    if (left_len != right_len) {
+        return 0;
+    }
+
+    for (i = 0; i < left_len; ++i) {
+        uint8_t ch = left[i];
+        uint8_t expected = (uint8_t)right[i];
+
+        if (ch >= 'A' && ch <= 'Z') {
+            ch = (uint8_t)(ch + ('a' - 'A'));
+        }
+
+        if (expected >= 'A' && expected <= 'Z') {
+            expected = (uint8_t)(expected + ('a' - 'A'));
+        }
+
+        if (ch != expected) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static void
+unblock_http3_uniform_fields_free(unblock_http3_uniform_fields *fields)
+{
+    size_t i;
+
+    if (fields == NULL) {
+        return;
+    }
+
+    if (fields->owned_names != NULL) {
+        for (i = 0; i < fields->nvlen; ++i) {
+            if (fields->owned_names[i] != NULL) {
+                Safefree(fields->owned_names[i]);
+            }
+        }
+
+        Safefree(fields->owned_names);
+    }
+
+    if (fields->nva != NULL) {
+        Safefree(fields->nva);
+    }
+
+    fields->nva = NULL;
+    fields->owned_names = NULL;
+    fields->nvlen = 0;
+}
+
+static void
+unblock_http3_uniform_nv_static(
+    nghttp3_nv *nv,
+    const char *name,
+    const char *value,
+    size_t value_len
+)
+{
+    nv->name = (const uint8_t *)name;
+    nv->namelen = strlen(name);
+    nv->value = (const uint8_t *)value;
+    nv->valuelen = value_len;
+    nv->flags = NGHTTP3_NV_FLAG_NONE;
+}
+
+static void
+unblock_http3_uniform_nv_sv(
+    nghttp3_nv *nv,
+    const char *name,
+    SV *value
+)
+{
+    STRLEN len;
+    const char *bytes = SvPVbyte(value, len);
+
+    unblock_http3_uniform_nv_static(
+        nv,
+        name,
+        bytes,
+        (size_t)len
+    );
+}
+
+static void
+unblock_http3_validate_uniform_field(
+    int context,
+    const uint8_t *name,
+    size_t namelen,
+    const uint8_t *value,
+    size_t valuelen
+)
+{
+    size_t start;
+    size_t end;
+
+    if (
+        unblock_http3_bytes_equal(name, namelen, "connection")
+        || unblock_http3_bytes_equal(name, namelen, "keep-alive")
+        || unblock_http3_bytes_equal(name, namelen, "proxy-connection")
+        || unblock_http3_bytes_equal(name, namelen, "transfer-encoding")
+        || unblock_http3_bytes_equal(name, namelen, "upgrade")
+    ) {
+        croak("HTTP/3 does not allow connection-specific field '%.*s'",
+            (int)namelen, (const char *)name);
+    }
+
+    if (unblock_http3_bytes_equal(name, namelen, "te")) {
+        if (context != 0) {
+            croak("HTTP/3 TE is only allowed in request headers");
+        }
+
+        start = 0;
+        end = valuelen;
+
+        while (
+            start < end
+            && (value[start] == ' ' || value[start] == '\t')
+        ) {
+            ++start;
+        }
+
+        while (
+            end > start
+            && (value[end - 1] == ' ' || value[end - 1] == '\t')
+        ) {
+            --end;
+        }
+
+        if (
+            !unblock_http3_ascii_equal_ci(
+                value + start,
+                end - start,
+                "trailers"
+            )
+        ) {
+            croak("HTTP/3 TE field may contain only 'trailers'");
+        }
+    }
+
+    if (context == 2) {
+        if (unblock_http3_bytes_equal(name, namelen, "content-length")) {
+            croak("HTTP/3 Content-Length is not allowed in trailers");
+        }
+
+        if (unblock_http3_bytes_equal(name, namelen, "host")) {
+            croak("HTTP/3 Host is not allowed in trailers");
+        }
+    }
+}
+
+static size_t
+unblock_http3_uniform_section_size(
+    pTHX_ const uhttp_native_section *section
+)
+{
+    Size_t i;
+    Size_t count = uhttp_native_field_count(aTHX_ section);
+    size_t total = 0;
+
+    for (i = 0; i < count; ++i) {
+        SV *name_sv;
+        SV *value_sv;
+        STRLEN namelen;
+        STRLEN valuelen;
+
+        if (
+            !uhttp_native_field_at(
+                aTHX_ section,
+                i,
+                &name_sv,
+                &value_sv
+            )
+        ) {
+            croak("Uniform header inspection failed");
+        }
+
+        (void)SvPVbyte(name_sv, namelen);
+        (void)SvPVbyte(value_sv, valuelen);
+
+        if (
+            total > SIZE_MAX - (size_t)namelen
+            || total + (size_t)namelen > SIZE_MAX - (size_t)valuelen
+            || total + (size_t)namelen + (size_t)valuelen > SIZE_MAX - 32
+        ) {
+            croak("HTTP/3 field section size overflow");
+        }
+
+        total += (size_t)namelen + (size_t)valuelen + 32;
+    }
+
+    return total;
+}
+
+static size_t
+unblock_http3_uniform_pseudo_size(
+    const char *name,
+    SV *value
+)
+{
+    STRLEN valuelen;
+
+    (void)SvPVbyte(value, valuelen);
+    return strlen(name) + (size_t)valuelen + 32;
+}
+
+static void
+unblock_http3_uniform_add_section(
+    pTHX_ unblock_http3_uniform_fields *out,
+    size_t *index,
+    const uhttp_native_section *section,
+    int context
+)
+{
+    Size_t i;
+    Size_t count = uhttp_native_field_count(aTHX_ section);
+
+    for (i = 0; i < count; ++i) {
+        SV *name_sv;
+        SV *value_sv;
+        STRLEN namelen;
+        STRLEN valuelen;
+        const char *name;
+        const char *value;
+        uint8_t *lower = NULL;
+        size_t j;
+
+        if (
+            !uhttp_native_field_at(
+                aTHX_ section,
+                i,
+                &name_sv,
+                &value_sv
+            )
+        ) {
+            croak("Uniform field inspection failed");
+        }
+
+        name = SvPVbyte(name_sv, namelen);
+        value = SvPVbyte(value_sv, valuelen);
+
+        Newx(lower, namelen ? namelen : 1, uint8_t);
+
+        for (j = 0; j < (size_t)namelen; ++j) {
+            uint8_t ch = (uint8_t)name[j];
+
+            if (ch >= 'A' && ch <= 'Z') {
+                ch = (uint8_t)(ch + ('a' - 'A'));
+            }
+
+            lower[j] = ch;
+        }
+
+        unblock_http3_validate_uniform_field(
+            context,
+            lower,
+            (size_t)namelen,
+            (const uint8_t *)value,
+            (size_t)valuelen
+        );
+
+        out->nva[*index].name = lower;
+        out->nva[*index].namelen = (size_t)namelen;
+        out->nva[*index].value = (const uint8_t *)value;
+        out->nva[*index].valuelen = (size_t)valuelen;
+        out->nva[*index].flags = NGHTTP3_NV_FLAG_NONE;
+        out->owned_names[*index] = lower;
+        ++*index;
+    }
+}
+
+static int
+unblock_http3_uniform_request_shape(
+    pTHX_ const uhttp_native_view *view,
+    int *is_connect,
+    int *is_extended
+)
+{
+    STRLEN method_len;
+    const char *method;
+
+    if (!SvOK(view->method) || !SvOK(view->target)) {
+        croak("canonical Uniform request is missing method or target");
+    }
+
+    method = SvPVbyte(view->method, method_len);
+    *is_connect =
+        method_len == 7 && memcmp(method, "CONNECT", 7) == 0
+            ? 1 : 0;
+    *is_extended = *is_connect && SvOK(view->protocol) ? 1 : 0;
+
+    if (*is_connect) {
+        if (!SvOK(view->authority)) {
+            croak("HTTP/3 CONNECT request requires authority");
+        }
+
+        if (*is_extended && !SvOK(view->scheme)) {
+            croak("HTTP/3 Extended CONNECT request requires scheme");
+        }
+    } else {
+        if (!SvOK(view->scheme)) {
+            croak("HTTP/3 request requires scheme");
+        }
+
+        if (!SvOK(view->authority)) {
+            croak("HTTP/3 request requires authority");
+        }
+    }
+
+    return 1;
+}
+
+static size_t
+unblock_http3_uniform_request_size(
+    pTHX_ const uhttp_native_view *view
+)
+{
+    int is_connect;
+    int is_extended;
+    size_t total;
+
+    unblock_http3_uniform_request_shape(
+        aTHX_ view,
+        &is_connect,
+        &is_extended
+    );
+
+    total = unblock_http3_uniform_section_size(
+        aTHX_ &view->headers
+    );
+
+    total += unblock_http3_uniform_pseudo_size(
+        ":method",
+        view->method
+    );
+
+    if (is_extended) {
+        total += unblock_http3_uniform_pseudo_size(
+            ":protocol",
+            view->protocol
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":scheme",
+            view->scheme
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":authority",
+            view->authority
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":path",
+            view->target
+        );
+    } else if (is_connect) {
+        total += unblock_http3_uniform_pseudo_size(
+            ":authority",
+            view->authority
+        );
+    } else {
+        total += unblock_http3_uniform_pseudo_size(
+            ":scheme",
+            view->scheme
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":authority",
+            view->authority
+        );
+        total += unblock_http3_uniform_pseudo_size(
+            ":path",
+            view->target
+        );
+    }
+
+    return total;
+}
+
+static size_t
+unblock_http3_uniform_response_size(
+    pTHX_ const uhttp_native_view *view
+)
+{
+    IV status;
+    char status_buffer[4];
+
+    if (!SvOK(view->status)) {
+        croak("canonical Uniform response is missing status");
+    }
+
+    status = SvIV(view->status);
+
+    if (status < 100 || status > 599) {
+        croak("canonical Uniform response status is invalid");
+    }
+
+    snprintf(status_buffer, sizeof(status_buffer), "%ld", (long)status);
+
+    return strlen(":status") + strlen(status_buffer) + 32
+        + unblock_http3_uniform_section_size(
+            aTHX_ &view->headers
+        );
+}
+
+static void
+unblock_http3_uniform_request_fields(
+    pTHX_ const uhttp_native_view *view,
+    unblock_http3_uniform_fields *out
+)
+{
+    Size_t header_count = uhttp_native_field_count(
+        aTHX_ &view->headers
+    );
+    int is_connect;
+    int is_extended;
+    size_t pseudo_count;
+    size_t index = 0;
+
+    unblock_http3_uniform_request_shape(
+        aTHX_ view,
+        &is_connect,
+        &is_extended
+    );
+
+    pseudo_count = is_extended ? 5 : (is_connect ? 2 : 4);
+
+    Zero(out, 1, unblock_http3_uniform_fields);
+    out->nvlen = pseudo_count + (size_t)header_count;
+
+    if (out->nvlen == 0) {
+        return;
+    }
+
+    Newxz(out->nva, out->nvlen, nghttp3_nv);
+    Newxz(out->owned_names, out->nvlen, uint8_t *);
+
+    unblock_http3_uniform_nv_sv(
+        &out->nva[index++],
+        ":method",
+        view->method
+    );
+
+    if (is_extended) {
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":protocol",
+            view->protocol
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":scheme",
+            view->scheme
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":authority",
+            view->authority
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":path",
+            view->target
+        );
+    } else if (is_connect) {
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":authority",
+            view->authority
+        );
+    } else {
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":scheme",
+            view->scheme
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":authority",
+            view->authority
+        );
+        unblock_http3_uniform_nv_sv(
+            &out->nva[index++],
+            ":path",
+            view->target
+        );
+    }
+
+    unblock_http3_uniform_add_section(
+        aTHX_ out,
+        &index,
+        &view->headers,
+        0
+    );
+}
+
+static void
+unblock_http3_uniform_response_fields(
+    pTHX_ const uhttp_native_view *view,
+    unblock_http3_uniform_fields *out,
+    char status_buffer[4]
+)
+{
+    Size_t header_count = uhttp_native_field_count(
+        aTHX_ &view->headers
+    );
+    IV status;
+    size_t index = 0;
+
+    if (!SvOK(view->status)) {
+        croak("canonical Uniform response is missing status");
+    }
+
+    status = SvIV(view->status);
+
+    if (status < 100 || status > 599) {
+        croak("canonical Uniform response status is invalid");
+    }
+
+    snprintf(status_buffer, 4, "%ld", (long)status);
+
+    Zero(out, 1, unblock_http3_uniform_fields);
+    out->nvlen = 1 + (size_t)header_count;
+
+    Newxz(out->nva, out->nvlen, nghttp3_nv);
+    Newxz(out->owned_names, out->nvlen, uint8_t *);
+
+    unblock_http3_uniform_nv_static(
+        &out->nva[index++],
+        ":status",
+        status_buffer,
+        strlen(status_buffer)
+    );
+
+    unblock_http3_uniform_add_section(
+        aTHX_ out,
+        &index,
+        &view->headers,
+        1
+    );
+}
+
+static void
+unblock_http3_uniform_trailer_fields(
+    pTHX_ const uhttp_native_view *view,
+    unblock_http3_uniform_fields *out
+)
+{
+    Size_t count = uhttp_native_field_count(
+        aTHX_ &view->trailers
+    );
+    size_t index = 0;
+
+    Zero(out, 1, unblock_http3_uniform_fields);
+    out->nvlen = (size_t)count;
+
+    if (out->nvlen == 0) {
+        return;
+    }
+
+    Newxz(out->nva, out->nvlen, nghttp3_nv);
+    Newxz(out->owned_names, out->nvlen, uint8_t *);
+
+    unblock_http3_uniform_add_section(
+        aTHX_ out,
+        &index,
+        &view->trailers,
+        2
+    );
+}
+
+static void
+unblock_http3_uniform_view(
+    pTHX_ SV *message,
+    U32 expected_kind,
+    uhttp_native_view *view
+)
+{
+    dMY_CXT;
+
+    if (
+        !uhttp_native_inspect(
+            aTHX_ &MY_CXT.uniform_api,
+            message,
+            view
+        )
+    ) {
+        croak("native Uniform fast path requires an exact canonical message");
+    }
+
+    if (view->kind != expected_kind) {
+        croak("canonical Uniform message has the wrong kind");
+    }
+}
+
 static nghttp3_nv *
 unblock_http3_fields_from_sv(SV *fields_sv, size_t *pnvlen)
 {
@@ -990,6 +1620,25 @@ unblock_http3_fields_from_sv(SV *fields_sv, size_t *pnvlen)
 MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native
 
 PROTOTYPES: DISABLE
+
+BOOT:
+    MY_CXT_INIT;
+    if (!uhttp_native_init(
+        aTHX_ &MY_CXT.uniform_api,
+        UHTTP_NATIVE_ABI_VERSION
+    ))
+        croak("Uniform::HTTP native FastPath ABI mismatch");
+
+void
+CLONE(...)
+    CODE:
+        MY_CXT_CLONE;
+        if (!uhttp_native_init(
+            aTHX_ &MY_CXT.uniform_api,
+            UHTTP_NATIVE_ABI_VERSION
+        ))
+            croak("Uniform::HTTP native FastPath clone ABI mismatch");
+
 
 SV *
 _parse_priority(value)
