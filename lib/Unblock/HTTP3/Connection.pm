@@ -3214,6 +3214,16 @@ sub _service_stream {
         }
     }
 
+    my $local_reset = $stream->local_reset_code;
+    if (defined($local_reset) && !$lifecycle->{local_reset_seen}) {
+        $lifecycle->{local_reset_seen} = 1;
+        $lifecycle->{local_reset_code} = 0 + $local_reset;
+
+        my $transaction = $self->{transactions}{$id};
+        $transaction->_mark_local_reset($local_reset)
+            if defined $transaction;
+    }
+
     if ($stream->closed && !$lifecycle->{closed_seen}) {
         $lifecycle->{closed_seen} = 1;
 
