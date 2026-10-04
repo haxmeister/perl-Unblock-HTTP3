@@ -2537,6 +2537,7 @@ sub _reject_message_stream {
     }
 
     $self->{native}->discard_body($id);
+    $self->{native}->discard_header_block($id);
     return;
 }
 
@@ -3515,7 +3516,7 @@ sub _drain_events {
         }
 
         if ($type eq 'headers') {
-            my ($block, $field_section_size, $fin) = @args;
+            my ($field_section_size, $fin) = @args;
 
             if (
                 $field_section_size
@@ -3530,7 +3531,6 @@ sub _drain_events {
 
             $self->_finish_headers(
                 $id,
-                $block,
                 $fin ? 1 : 0,
             );
             next;
@@ -3718,25 +3718,25 @@ sub _coalesce_trailer_cookie_fields {
 }
 
 sub _finish_headers {
-    my ($self, $id, $block, $fin) = @_;
+    my ($self, $id, $fin) = @_;
 
     my $message;
 
     if ($self->{role} eq 'server') {
-        my $method = $block->pseudo(':method');
+        my $method = $self->{native}->header_pseudo($id, ':method');
 
         croak 'HTTP/3 request is missing :method'
             unless defined $method;
 
-        my $scheme = $block->pseudo(':scheme');
-        my $authority = $block->pseudo(':authority');
-        my $path = $block->pseudo(':path');
-        my $protocol = $block->pseudo(':protocol');
+        my $scheme = $self->{native}->header_pseudo($id, ':scheme');
+        my $authority = $self->{native}->header_pseudo($id, ':authority');
+        my $path = $self->{native}->header_pseudo($id, ':path');
+        my $protocol = $self->{native}->header_pseudo($id, ':protocol');
         my $is_connect = $method eq 'CONNECT' ? 1 : 0;
         my $is_extended_connect =
             $is_connect && defined($protocol) ? 1 : 0;
         my $target;
-        my $host_values = $block->header_values('host');
+        my $host_values = $self->{native}->header_values($id, 'host');
 
         if ($is_connect && !$is_extended_connect) {
             croak 'HTTP/3 CONNECT request is missing :authority'
@@ -3802,7 +3802,8 @@ sub _finish_headers {
             }
         }
 
-        $message = $block->uniform_request(
+        $message = $self->{native}->receive_uniform_request(
+            $id,
             $method,
             $target,
             $scheme,
@@ -3865,13 +3866,13 @@ sub _finish_headers {
             push @{ $self->{ready_transactions} }, $transaction;
         }
     } else {
-        my $status = $block->pseudo(':status');
+        my $status = $self->{native}->header_pseudo($id, ':status');
 
         croak 'HTTP/3 response is missing :status'
             unless defined $status;
 
         if (
-            $block->has_header('capsule-protocol')
+            $self->{native}->has_header($id, 'capsule-protocol')
             && !(0 + $status >= 200 && 0 + $status < 300)
         ) {
             $self->_reject_message_stream(
@@ -3881,7 +3882,8 @@ sub _finish_headers {
             return;
         }
 
-        $message = $block->uniform_response(
+        $message = $self->{native}->receive_uniform_response(
+            $id,
             0 + $status,
             $fin,
         );
