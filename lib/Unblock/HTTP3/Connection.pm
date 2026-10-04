@@ -1085,6 +1085,7 @@ sub nghttp3_version {
 sub early_data_status {
     my ($self, @args) = @_;
     croak 'early_data_status() does not accept arguments' if @args;
+    $self->_sync_early_data_status if $self->{started};
     return $self->{quic}->early_data_status;
 }
 
@@ -1374,6 +1375,8 @@ sub _fail_connection {
 
 sub request {
     my ($self, $request, %option) = @_;
+
+    $self->_sync_early_data_status if $self->{started};
 
     croak 'request() is only available on a client HTTP/3 connection'
         unless $self->{role} eq 'client';
@@ -2559,6 +2562,11 @@ sub start {
     weaken($weak);
 
     $self->{quic}->on_stream_activity(sub {
+        return unless defined $weak;
+        $weak->_service;
+    });
+
+    $self->{quic}->on_stream_available(sub {
         return unless defined $weak;
         $weak->_service;
     });

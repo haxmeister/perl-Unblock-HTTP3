@@ -409,7 +409,9 @@ ok(
 
 ok(
     run_until(sub {
+        my $status = $third_client_h3->early_data_status;
         return $third_client_h3->started
+            && $status eq 'rejected'
             && $replayed_tx->is_terminal;
     }),
     'HTTP/3 rolls back rejected early streams and restarts for 1-RTT',
