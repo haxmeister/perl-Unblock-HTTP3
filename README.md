@@ -248,6 +248,30 @@ The Transaction also provides `next_datagram`, `on_datagram`, and
 
 The higher-level protocol still decides what the Datagram payload means.
 
+## ORIGIN
+
+Servers can advertise the RFC 9412 Origin Set extension:
+
+```perl
+my $h3 = Unblock::HTTP3::Connection->server(
+    quic => $quic,
+    origins => [
+        'https://example.com',
+        'https://www.example.com',
+    ],
+);
+```
+
+A client can read the advertised entries with:
+
+```perl
+my $origins = $h3->peer_origins;
+```
+
+Before a complete ORIGIN frame arrives this returns `undef`. An explicit empty
+ORIGIN frame returns an empty array reference. Invalid received origin entries
+are ignored.
+
 ## Request priority
 
 RFC 9218 priority can be set on a request:
@@ -333,6 +357,7 @@ semantics to them:
 
 - extension SETTINGS
 - extension unidirectional streams
+- RFC 9412 ORIGIN
 - Extended CONNECT protocol names
 - Capsules
 - HTTP Datagrams
