@@ -30,7 +30,7 @@ jobs:
         run: |
           cpanm --notest 'Alien::nghttp3@0.01'
           cpanm --notest 'Net::QUIC@0.04'
-          cpanm --notest 'Uniform::HTTP@0.04'
+          cpanm --notest 'Uniform::HTTP@0.05'
           cpanm --notest --installdeps .
 
       - name: Build

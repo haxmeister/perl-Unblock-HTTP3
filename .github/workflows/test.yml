@@ -35,14 +35,14 @@ jobs:
         run: |
           cpanm --notest 'Alien::nghttp3@0.01'
           cpanm --notest 'Net::QUIC@0.04'
-          cpanm --notest 'Uniform::HTTP@0.04'
+          cpanm --notest 'Uniform::HTTP@0.05'
           cpanm --notest --installdeps .
 
       - name: Verify released dependency versions
         run: |
           perl -MAlien::nghttp3 -e 'die "wrong Alien::nghttp3\n" unless $Alien::nghttp3::VERSION eq "0.01"; print "Alien::nghttp3 $Alien::nghttp3::VERSION\n"'
           perl -MNet::QUIC -e 'die "wrong Net::QUIC\n" unless $Net::QUIC::VERSION eq "0.04"; print "Net::QUIC $Net::QUIC::VERSION\n"'
-          perl -MUniform::HTTP -e 'die "wrong Uniform::HTTP\n" unless $Uniform::HTTP::VERSION eq "0.04"; print "Uniform::HTTP $Uniform::HTTP::VERSION\n"'
+          perl -MUniform::HTTP -e 'die "wrong Uniform::HTTP\n" unless $Uniform::HTTP::VERSION eq "0.05"; print "Uniform::HTTP $Uniform::HTTP::VERSION\n"'
 
       - name: Configure
         run: perl Makefile.PL
