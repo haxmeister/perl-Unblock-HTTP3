@@ -1,9 +1,12 @@
 # Missing features
 
-Unblock::HTTP3 0.01 implements the core HTTP/3 engine planned for the first
-release. There is no known missing core feature that blocks normal client,
+Unblock::HTTP3 implements the core HTTP/3 engine needed for normal client,
 server, multiplexing, streaming, CONNECT, Capsule, HTTP Datagram, RFC 9412
-ORIGIN, priority, graceful shutdown, or 0-RTT use.
+ORIGIN, priority, graceful shutdown, and 0-RTT use.
+
+The RFC audit found one narrow RFC 9218 priority-parsing limitation in the
+libnghttp3 1.18.0 dependency. It does not block normal priority use, but it is
+recorded below because it prevents claiming perfect normative coverage.
 
 This file records work that is deliberately deferred so it does not get lost.
 
@@ -15,6 +18,23 @@ The libnghttp3 1.18.0 API used by this distribution does not implement HTTP/3
 Server Push. Revisit this only if the native library gains suitable support.
 Unblock::HTTP3 should not build a second HTTP/3 state machine around libnghttp3
 to add it.
+
+## RFC 9218 parameter edge semantics
+
+Normal Priority fields and PRIORITY_UPDATE are supported.
+
+libnghttp3 1.18.0 can reject a complete priority value when a recognized
+parameter has an out-of-range value or unexpected type. RFC 9218 instead
+requires that parameter to be ignored while other valid parameters remain in
+effect, provided the Structured Fields Dictionary itself parsed successfully.
+
+The public libnghttp3 callbacks do not expose the raw received PRIORITY_UPDATE
+value, so Unblock::HTTP3 cannot completely repair this behavior without adding
+its own RFC 8941 Structured Fields parser or replacing part of native priority
+processing.
+
+Revisit this when libnghttp3 changes its parser semantics or when a suitable
+small Structured Fields implementation is deliberately added.
 
 ## Arbitrary extension frames
 
@@ -73,18 +93,17 @@ Introspection should not leak native structs into the public API.
 
 ## Performance work
 
-The first release prioritizes correctness and composability.
+Repeatable HTTP/3, body, and loopback benchmarks now exist. The 0.02 work also
+reduced outgoing and incoming body copies and moved canonical Uniform message
+access onto FastPath.
 
-Later benchmarking can investigate:
+Useful later measurements still include:
 
-- Perl/XS copy counts
-- field construction costs
-- streaming-body copy reduction
 - QPACK configuration tradeoffs
-- high-concurrency request throughput
+- very high-concurrency request throughput
+- profiling against additional independent HTTP/3 implementations
 
-Performance changes should be driven by repeatable benchmarks rather than by
-adding complexity speculatively.
+Performance changes should remain benchmark-driven rather than speculative.
 
 ## Optional GREASE generation
 
