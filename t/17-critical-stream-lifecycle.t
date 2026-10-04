@@ -346,4 +346,39 @@ sub make_pair {
     $pair->{close}->();
 }
 
+{
+    my $pair = make_pair();
+
+    my $stream = $pair->{client_quic}->open_uni_stream;
+    ok(defined($stream), 'raw peer opens control stream with duplicate setting');
+
+    $stream->send(
+        "\x00"
+        . "\x04\x04"
+        . "\x06\x01"
+        . "\x06\x02"
+    );
+
+    ok(
+        $pair->{run_until}->(sub {
+            return $pair->{server_h3}->failed;
+        }),
+        'duplicate setting identifier fails HTTP/3 connection',
+    );
+
+    is(
+        $pair->{server_h3}->error_code,
+        0x0109,
+        'duplicate setting identifier uses H3_SETTINGS_ERROR',
+    );
+
+    like(
+        $pair->{server_h3}->error,
+        qr/duplicate HTTP\/3 setting 6/i,
+        'duplicate setting records the ambiguous setting identifier',
+    );
+
+    $pair->{close}->();
+}
+
 done_testing;
