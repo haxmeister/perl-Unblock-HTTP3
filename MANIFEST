@@ -38,3 +38,4 @@ t/15-receive-body-ownership.t
 t/16-rfc-wire-errors.t
 t/17-critical-stream-lifecycle.t
 t/18-client-protocol-errors.t
+t/19-cookie-coalescing.t
