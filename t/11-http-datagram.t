@@ -322,7 +322,7 @@ ok(
     run_until(sub { return @callback_payloads == 1 }),
     'Transaction callback receives an HTTP Datagram',
 );
-is(@callback_payloads, ['callback-data'],
+is(\@callback_payloads, ['callback-data'],
     'callback receives the unwrapped payload');
 
 ok(

@@ -187,6 +187,7 @@ sub max_datagram_payload_size {
     my ($self, @args) = @_;
     croak 'max_datagram_payload_size() does not accept arguments' if @args;
     return 0 unless $self->{datagrams_enabled};
+    return 0 if $self->is_terminal;
 
     my $connection = $self->{connection};
     return 0 unless defined $connection;
