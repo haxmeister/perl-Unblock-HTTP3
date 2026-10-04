@@ -27,8 +27,10 @@ uses Net::QUIC for QUIC transport.
 Unblock::HTTP3 does not own UDP sockets, timers, or an event loop. The event-loop
 adapter remains below Net::QUIC.
 
-The public request and response classes follow the Uniform::HTTP message
-contract.
+Uniform::HTTP 0.04 supplies the runtime HTTP message semantics.
+Unblock::HTTP3::Request and Unblock::HTTP3::Response are thin subclasses of the
+Uniform request and response classes, and client connections also accept a
+plain Uniform::HTTP::Request directly.
 
 =head1 AUTHOR
 
