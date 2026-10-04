@@ -231,6 +231,73 @@ for my $case (
 
 
 {
+    my $native = Unblock::HTTP3::_Native->server(
+        65_536,
+        0,
+        100,
+    );
+
+    read_error(
+        native    => $native,
+        stream_id => 2,
+        bytes     => h3_varint(0x02) . "\x21",
+        code      => 0x0201,
+        label     => 'QPACK encoder exceeds dynamic table capacity',
+    );
+}
+
+{
+    my $native = Unblock::HTTP3::_Native->server;
+
+    read_error(
+        native    => $native,
+        stream_id => 2,
+        bytes     => h3_varint(0x03) . "\x00",
+        code      => 0x0202,
+        label     => 'QPACK decoder sends zero Insert Count Increment',
+    );
+}
+
+{
+    my $native = Unblock::HTTP3::_Native->server;
+
+    read_error(
+        native    => $native,
+        stream_id => 2,
+        bytes     => h3_varint(0x01) . h3_varint(0),
+        code      => 0x0103,
+        label     => 'client-initiated push stream',
+    );
+}
+
+{
+    my $native = Unblock::HTTP3::_Native->client;
+
+    read_error(
+        native    => $native,
+        stream_id => 3,
+        bytes     => control_stream(
+            h3_frame(0x0d, h3_varint(0)),
+        ),
+        code      => 0x0105,
+        label     => 'server-sent MAX_PUSH_ID',
+    );
+}
+
+{
+    my $native = Unblock::HTTP3::_Native->client;
+
+    read_error(
+        native    => $native,
+        stream_id => 3,
+        bytes     => h3_varint(0x01) . h3_varint(0),
+        code      => 0x0108,
+        label     => 'server push without advertised push capacity',
+    );
+}
+
+
+{
     my $native = Unblock::HTTP3::_Native->server;
     my $result = $native->read_stream(
         2,
