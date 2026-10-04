@@ -1,0 +1,62 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux Perl ${{ matrix.perl }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        perl:
+          - "5.20"
+          - "5.28"
+          - "5.36"
+          - "5.44"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+          enable-modules-cache: false
+
+      - name: Install released CPAN dependencies
+        run: |
+          cpanm --notest 'Alien::nghttp3@0.01'
+          cpanm --notest 'Net::QUIC@0.03'
+          cpanm --notest 'Uniform::HTTP@0.02'
+          cpanm --notest --installdeps .
+
+      - name: Verify released dependency versions
+        run: |
+          perl -MAlien::nghttp3 -e 'die "wrong Alien::nghttp3\n" unless $Alien::nghttp3::VERSION eq "0.01"; print "Alien::nghttp3 $Alien::nghttp3::VERSION\n"'
+          perl -MNet::QUIC -e 'die "wrong Net::QUIC\n" unless $Net::QUIC::VERSION eq "0.03"; print "Net::QUIC $Net::QUIC::VERSION\n"'
+          perl -MUniform::HTTP -e 'die "wrong Uniform::HTTP\n" unless $Uniform::HTTP::VERSION eq "0.02"; print "Uniform::HTTP $Uniform::HTTP::VERSION\n"'
+
+      - name: Configure
+        run: perl Makefile.PL
+
+      - name: Build
+        run: perl -MConfig -e 'system($Config{make}) == 0 or exit 1'
+
+      - name: Test
+        run: perl -MConfig -e 'system($Config{make}, "test") == 0 or exit 1'
+
+      - name: Check distribution
+        if: matrix.perl == '5.44'
+        run: perl -MConfig -e 'system($Config{make}, "distcheck") == 0 or exit 1'
+
+      - name: Test distribution
+        if: matrix.perl == '5.44'
+        run: perl -MConfig -e 'system($Config{make}, "disttest") == 0 or exit 1'

@@ -1,0 +1,13 @@
+^\.git(?:/|$)
+^\.github(?:/|$)
+^\.gitignore$
+^blib(?:/|$)
+^_build(?:/|$)
+^Makefile$
+^Makefile\.old$
+^MYMETA\.(?:json|yml)$
+^HTTP3\.c$
+^HTTP3\.o$
+^HTTP3\.bs$
+^pm_to_blib$
+^Unblock-HTTP3-.*\.tar\.gz$
