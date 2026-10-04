@@ -1,5 +1,20 @@
 Revision history for Unblock-HTTP3
 
+0.02  Not yet released
+    - Add RFC 9412 ORIGIN support through libnghttp3.
+    - Add server origins configuration and client peer_origins inspection.
+    - Add independent quic-go client interoperability against an
+      Unblock::HTTP3 server.
+    - Expand interoperability documentation to cover both client and server
+      directions.
+    - Add repeatable real UDP/TLS/QUIC/HTTP/3 loopback performance benchmarks.
+    - Add split-process benchmarks to separate client/server event-driving cost.
+    - Add HTTP/3-layer microbenchmarks for Uniform message construction,
+      wire-field preparation, field-section accounting, and native nghttp3
+      submission.
+    - Avoid rebuilding the connection-specific header lookup for every field,
+      reducing representative HTTP/3 wire-field preparation cost.
+
 0.01  2026-10-04
     - Start Unblock::HTTP3.
     - Require released Net::QUIC 0.04 for QUIC transport and RFC 9221 DATAGRAM.

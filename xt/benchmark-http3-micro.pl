@@ -97,6 +97,43 @@ my $native_fields = [
 
 my $sink;
 
+sub legacy_wire_headers {
+    my ($message, $context) = @_;
+
+    my @headers;
+
+    for my $index (0 .. $message->header_count - 1) {
+        my $name = $message->header_name($index);
+        my $value = $message->header_value($index);
+
+        $name =~ tr/A-Z/a-z/;
+
+        my %forbidden = map { $_ => 1 } qw(
+            connection
+            keep-alive
+            proxy-connection
+            transfer-encoding
+            upgrade
+        );
+
+        die "legacy validation rejected $name\n"
+            if $forbidden{$name};
+
+        if ($name eq 'te') {
+            my $normalized = $value;
+            $normalized =~ s/\A[ \t]+//;
+            $normalized =~ s/[ \t]+\z//;
+            die "legacy TE validation rejected value\n"
+                unless $context eq 'request'
+                    && lc($normalized) eq 'trailers';
+        }
+
+        push @headers, [ $name, $value ];
+    }
+
+    return \@headers;
+}
+
 print "Unblock::HTTP3 HTTP-layer microbenchmark\n";
 print "perl=$]\n";
 print "unblock_http3=$Unblock::HTTP3::VERSION\n";
@@ -129,6 +166,47 @@ measure(
 );
 
 measure(
+    'Header access/lowercase/copy',
+    $iterations,
+    sub {
+        my @headers;
+
+        for my $index (0 .. $request->header_count - 1) {
+            my $name = $request->header_name($index);
+            my $value = $request->header_value($index);
+
+            $name =~ tr/A-Z/a-z/;
+            push @headers, [ $name, $value ];
+        }
+
+        $sink = [ @headers ];
+    },
+);
+
+measure(
+    'HTTP/3 header validation',
+    $iterations,
+    sub {
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'accept', '*/*');
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'user-agent', 'unblock-http3-benchmark');
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'x-one', 'one');
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'x-two', 'two');
+    },
+);
+measure(
+    'Legacy wire field preparation',
+    $iterations,
+    sub {
+        $sink = [
+            [ ':method',    $request->method ],
+            [ ':scheme',    $request->scheme ],
+            [ ':authority', $request->authority ],
+            [ ':path',      $request->target ],
+            @{ legacy_wire_headers($request, 'request') },
+        ];
+    },
+);
+measure(
     'HTTP/3 wire field preparation',
     $iterations,
     sub {
@@ -147,6 +225,38 @@ measure(
     },
 );
 
+my $prepared_fields = [
+    [ ':method',    $request->method ],
+    [ ':scheme',    $request->scheme ],
+    [ ':authority', $request->authority ],
+    [ ':path',      $request->target ],
+    @{ Unblock::HTTP3::Connection::_wire_headers($request, 'request') },
+];
+
+measure(
+    'HTTP/3 field section sizing',
+    $iterations,
+    sub {
+        $sink = Unblock::HTTP3::Connection::_field_section_size($prepared_fields);
+    },
+);
+
+
+my $limit_state = {
+    peer_max_field_section_size => '65536',
+};
+
+measure(
+    'HTTP/3 field section limit check',
+    $iterations,
+    sub {
+        $sink = Unblock::HTTP3::Connection::_assert_peer_field_section_size(
+            $limit_state,
+            $prepared_fields,
+            'benchmark',
+        );
+    },
+);
 my $native = Unblock::HTTP3::_Native->client(
     65_536,
     0,
