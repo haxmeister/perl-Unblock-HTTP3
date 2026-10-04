@@ -77,6 +77,51 @@ sub measure_bytes {
     return;
 }
 
+sub measure_buffered_cycle {
+    my ($size, $iterations, $body) = @_;
+
+    my $response =
+        Unblock::HTTP3::Response->new(status => 200);
+
+    my $transaction = bless {
+        response                 => $response,
+        response_receive_mode    => 'buffered',
+        response_buffered_body   => '',
+        response_buffered_seen   => 0,
+    }, 'Unblock::HTTP3::Transaction';
+
+    my $start = time();
+
+    for (1 .. $iterations) {
+        $transaction->_append_buffered_body(
+            'response',
+            $body,
+        );
+    }
+
+    $transaction->_finish_received_message('response');
+
+    my $elapsed = time() - $start;
+    my $bytes = $size * $iterations;
+    my $mib_per_second =
+        ($bytes / (1024 * 1024)) / $elapsed;
+    my $us_per_chunk =
+        ($elapsed / $iterations) * 1_000_000;
+
+    printf "%-30s %10d %10d %12.6f %14.2f %14.2f\n",
+        'Buffered multi-chunk finalize',
+        $size,
+        $iterations,
+        $elapsed,
+        $mib_per_second,
+        $us_per_chunk;
+
+    die "buffered multi-chunk finalization byte count failed\n"
+        unless length($response->body // '') == $bytes;
+
+    return;
+}
+
 sub transfer_native {
     my ($source, $destination, $timestamp_ref) = @_;
 
@@ -267,6 +312,12 @@ for my $size (@sizes) {
     die "buffered accumulation byte count failed\n"
         unless length($buffered->{response_buffered_body})
             == $size * $iterations;
+
+    measure_buffered_cycle(
+        $size,
+        $iterations,
+        $body,
+    );
 
     my $bench_connection =
         Unblock::HTTP3::ReceiveBenchmark::Connection->new;
