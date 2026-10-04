@@ -129,6 +129,34 @@ measure(
 );
 
 measure(
+    'Header access/lowercase/copy',
+    $iterations,
+    sub {
+        my @headers;
+
+        for my $index (0 .. $request->header_count - 1) {
+            my $name = $request->header_name($index);
+            my $value = $request->header_value($index);
+
+            $name =~ tr/A-Z/a-z/;
+            push @headers, [ $name, $value ];
+        }
+
+        $sink = [ @headers ];
+    },
+);
+
+measure(
+    'HTTP/3 header validation',
+    $iterations,
+    sub {
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'accept', '*/*');
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'user-agent', 'unblock-http3-benchmark');
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'x-one', 'one');
+        Unblock::HTTP3::Connection::_validate_wire_field('request', 'x-two', 'two');
+    },
+);
+measure(
     'HTTP/3 wire field preparation',
     $iterations,
     sub {
@@ -144,6 +172,22 @@ measure(
                 )
             },
         ];
+    },
+);
+
+my $prepared_fields = [
+    [ ':method',    $request->method ],
+    [ ':scheme',    $request->scheme ],
+    [ ':authority', $request->authority ],
+    [ ':path',      $request->target ],
+    @{ Unblock::HTTP3::Connection::_wire_headers($request, 'request') },
+];
+
+measure(
+    'HTTP/3 field section sizing',
+    $iterations,
+    sub {
+        $sink = Unblock::HTTP3::Connection::_field_section_size($prepared_fields);
     },
 );
 
