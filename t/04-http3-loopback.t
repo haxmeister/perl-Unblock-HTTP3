@@ -1828,7 +1828,8 @@ $cancel_client_tx->cancel;
 ok(
     run_until(sub {
         return defined($cancel_server_tx->remote_stop_sending_code)
-            && defined($cancel_server_tx->remote_reset_code)
+            && defined($cancel_server_tx->local_reset_code)
+            && defined($cancel_client_tx->remote_reset_code)
             && $cancel_server_tx->is_cancelled
             && $cancel_response_producer->is_cancelled
             && $server_h3->{native}->streaming_retained_bytes == 0;
@@ -1849,21 +1850,21 @@ is(
 );
 
 is(
-    $cancel_client_tx->local_reset_code,
-    0x10c,
-    'client Transaction records local RESET_STREAM H3_REQUEST_CANCELLED',
-);
-
-is(
     $cancel_server_tx->remote_stop_sending_code,
     0x10c,
     'server Transaction records remote STOP_SENDING H3_REQUEST_CANCELLED',
 );
 
 is(
-    $cancel_server_tx->remote_reset_code,
+    $cancel_server_tx->local_reset_code,
     0x10c,
-    'server Transaction records remote RESET_STREAM H3_REQUEST_CANCELLED',
+    'server Transaction records local RESET_STREAM H3_REQUEST_CANCELLED',
+);
+
+is(
+    $cancel_client_tx->remote_reset_code,
+    0x10c,
+    'client Transaction records remote RESET_STREAM H3_REQUEST_CANCELLED',
 );
 
 ok($cancel_client_tx->is_aborted,
