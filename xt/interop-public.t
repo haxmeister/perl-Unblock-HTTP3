@@ -1,6 +1,9 @@
 use strict;
 use warnings;
 
+# Public interoperability uses each remote server's certificate chain; the
+# bundled localhost TLS fixture is only for the self-contained loopback suite.
+
 use IO::Select;
 use IO::Socket::INET;
 use Socket qw(inet_aton pack_sockaddr_in);
