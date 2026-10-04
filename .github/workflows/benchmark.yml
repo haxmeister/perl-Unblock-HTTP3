@@ -72,7 +72,7 @@ jobs:
         env:
           UNBLOCK_HTTP3_BODY_BENCH_BYTES: "33554432"
           UNBLOCK_HTTP3_BODY_BENCH_MAX_ITERATIONS: "50000"
-          UNBLOCK_HTTP3_BODY_BENCH_SIZES: "64,1024,16384,65536,262144"
+          UNBLOCK_HTTP3_BODY_BENCH_SIZES: "64,1024,16384,65536,262144,1048576"
         run: |
           set -o pipefail
           perl -Iblib/lib -Iblib/arch xt/benchmark-body-micro.pl 2>&1 \

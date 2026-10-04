@@ -9,6 +9,7 @@
 #define UNBLOCK_HTTP3_MAX_VARINT UINT64_C(0x3fffffffffffffff)
 
 typedef struct unblock_http3_body_chunk {
+    SV *storage;
     uint8_t *data;
     size_t len;
     size_t acked;
@@ -83,6 +84,22 @@ unblock_http3_body_create(
     return body;
 }
 
+static void
+unblock_http3_body_chunk_free(unblock_http3_body_chunk *chunk)
+{
+    if (chunk == NULL) {
+        return;
+    }
+
+    if (chunk->storage != NULL) {
+        SvREFCNT_dec(chunk->storage);
+        chunk->storage = NULL;
+    }
+
+    chunk->data = NULL;
+    Safefree(chunk);
+}
+
 static size_t
 unblock_http3_body_append(
     unblock_http3_native_conn *native,
@@ -91,17 +108,22 @@ unblock_http3_body_append(
 )
 {
     unblock_http3_body_chunk *chunk;
+    SV *storage;
     STRLEN len;
-    const char *bytes = SvPVbyte(body_sv, len);
+    const char *bytes;
+
+    storage = newSVsv(body_sv);
+    bytes = SvPVbyte(storage, len);
 
     if (len == 0) {
+        SvREFCNT_dec(storage);
         return 0;
     }
 
     Newxz(chunk, 1, unblock_http3_body_chunk);
-    Newx(chunk->data, len, uint8_t);
-    Copy(bytes, chunk->data, len, uint8_t);
 
+    chunk->storage = storage;
+    chunk->data = (uint8_t *)bytes;
     chunk->len = (size_t)len;
 
     if (body->tail != NULL) {
@@ -150,11 +172,7 @@ unblock_http3_body_discard(
             }
         }
 
-        if (chunk->data != NULL) {
-            Safefree(chunk->data);
-        }
-
-        Safefree(chunk);
+        unblock_http3_body_chunk_free(chunk);
         chunk = next_chunk;
     }
 
@@ -196,11 +214,7 @@ unblock_http3_body_remove(
                     native->streaming_retained_bytes -= retained;
                 }
 
-                if (chunk->data != NULL) {
-                    Safefree(chunk->data);
-                }
-
-                Safefree(chunk);
+                unblock_http3_body_chunk_free(chunk);
                 chunk = next_chunk;
             }
         }
@@ -222,11 +236,7 @@ unblock_http3_body_free_all(unblock_http3_native_conn *native)
         while (chunk != NULL) {
             unblock_http3_body_chunk *next_chunk = chunk->next;
 
-            if (chunk->data != NULL) {
-                Safefree(chunk->data);
-            }
-
-            Safefree(chunk);
+            unblock_http3_body_chunk_free(chunk);
             chunk = next_chunk;
         }
 
@@ -369,8 +379,7 @@ unblock_http3_acked_stream_data_cb(
                 body->tail = NULL;
             }
 
-            Safefree(chunk->data);
-            Safefree(chunk);
+            unblock_http3_body_chunk_free(chunk);
         }
     }
 

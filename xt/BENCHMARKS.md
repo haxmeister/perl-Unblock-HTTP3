@@ -116,7 +116,7 @@ Environment variables:
 
     UNBLOCK_HTTP3_BODY_BENCH_BYTES=33554432
     UNBLOCK_HTTP3_BODY_BENCH_MAX_ITERATIONS=50000
-    UNBLOCK_HTTP3_BODY_BENCH_SIZES=64,1024,16384,65536,262144
+    UNBLOCK_HTTP3_BODY_BENCH_SIZES=64,1024,16384,65536,262144,1048576
 
 The benchmark verifies native streaming retained bytes return to zero after the
 simulated ACKs. Its purpose is to decide whether body copying is expensive

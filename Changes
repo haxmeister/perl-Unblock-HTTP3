@@ -10,10 +10,13 @@ Revision history for Unblock-HTTP3
     - Add repeatable real UDP/TLS/QUIC/HTTP/3 loopback performance benchmarks.
     - Add split-process benchmarks to separate client/server event-driving cost.
     - Add HTTP/3-layer microbenchmarks for Uniform message construction,
-      wire-field preparation, field-section accounting, and native nghttp3
-      submission.
+      wire-field preparation, field-section accounting, native nghttp3
+      submission, and streaming body-copy cost.
     - Avoid rebuilding the connection-specific header lookup for every field,
       reducing representative HTTP/3 wire-field preparation cost.
+    - Retain outgoing body chunks as dedicated Perl scalar storage in native
+      state instead of allocating and copying a second C byte buffer, while
+      preserving caller-mutation isolation and ACK-driven release.
 
 0.01  2026-10-04
     - Start Unblock::HTTP3.
