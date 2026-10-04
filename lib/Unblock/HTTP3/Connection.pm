@@ -17,6 +17,7 @@ use Net::QUIC::Connection ();
 our $VERSION = '0.01';
 
 my $H3_DATAGRAM_ERROR = 0x33;
+my $H3_CLOSED_CRITICAL_STREAM = 0x0104;
 my $H3_EXCESSIVE_LOAD = 0x0107;
 my $H3_SETTINGS_ERROR = 0x0109;
 my $QPACK_DECODER_STREAM_ERROR = 0x0202;
@@ -3041,6 +3042,22 @@ sub _classify_peer_uni_stream {
     }
 }
 
+sub _is_local_critical_stream {
+    my ($self, $id) = @_;
+
+    return 1
+        if defined($self->{control_stream_id})
+            && $id == $self->{control_stream_id};
+    return 1
+        if defined($self->{qpack_encoder_stream_id})
+            && $id == $self->{qpack_encoder_stream_id};
+    return 1
+        if defined($self->{qpack_decoder_stream_id})
+            && $id == $self->{qpack_decoder_stream_id};
+
+    return 0;
+}
+
 sub _service_stream {
     my ($self, $id) = @_;
 
@@ -3188,6 +3205,14 @@ sub _service_stream {
         $lifecycle->{remote_reset_seen} = 1;
         $lifecycle->{remote_reset_code} = 0 + $remote_reset;
 
+        if ($self->{core_uni_streams}{$id}) {
+            $self->_fail_connection(
+                $H3_CLOSED_CRITICAL_STREAM,
+                'peer reset a critical HTTP/3 stream',
+            );
+            return;
+        }
+
         $self->{native}->shutdown_stream_read($id);
 
         my $transaction = $self->{transactions}{$id};
@@ -3203,6 +3228,14 @@ sub _service_stream {
         $lifecycle->{remote_stop_seen} = 1;
         $lifecycle->{remote_stop_sending_code} = 0 + $remote_stop;
 
+        if ($self->_is_local_critical_stream($id)) {
+            $self->_fail_connection(
+                $H3_CLOSED_CRITICAL_STREAM,
+                'peer requested closure of a critical HTTP/3 stream',
+            );
+            return;
+        }
+
         $self->{native}->shutdown_stream_write($id);
         $self->{native}->discard_body($id);
 
@@ -3216,6 +3249,14 @@ sub _service_stream {
 
     if ($stream->closed && !$lifecycle->{closed_seen}) {
         $lifecycle->{closed_seen} = 1;
+
+        if ($self->{core_uni_streams}{$id}) {
+            $self->_fail_connection(
+                $H3_CLOSED_CRITICAL_STREAM,
+                'peer closed a critical HTTP/3 stream',
+            );
+            return;
+        }
 
         $self->_release_peer_bidi_stream_credit(
             $id,
