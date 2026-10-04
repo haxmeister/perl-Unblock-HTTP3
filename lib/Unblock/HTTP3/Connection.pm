@@ -3348,7 +3348,7 @@ sub _drain_events {
                     next;
                 }
 
-                $reader->_push($bytes);
+                $reader->_push_owned($bytes);
                 next;
             }
 
