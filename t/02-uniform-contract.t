@@ -2,13 +2,13 @@ use strict;
 use warnings;
 
 use Test2::V0;
-use Uniform::HTTP 0.05;
+use Uniform::HTTP 0.06;
 use Uniform::HTTP::FastPath;
 use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 
-is($Uniform::HTTP::VERSION, '0.05',
-    'Unblock HTTP3 contract tests use Uniform HTTP 0.05');
+is($Uniform::HTTP::VERSION, '0.06',
+    'Unblock HTTP3 contract tests use Uniform HTTP 0.06');
 
 my $request = Uniform::HTTP::Request->new(
     method    => 'CONNECT',
