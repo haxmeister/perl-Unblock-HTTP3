@@ -250,6 +250,8 @@ sub run_requests {
     my $issued = 0;
     my $completed = 0;
     my $credit_stalls = 0;
+    my $peak_active = 0;
+    my $first_stall_active;
     my @active;
 
     my $hard_deadline = time() + 120;
@@ -273,11 +275,14 @@ sub run_requests {
 
             if (!defined $tx) {
                 ++$credit_stalls;
+                $first_stall_active = scalar(@active)
+                    unless defined $first_stall_active;
                 last;
             }
 
             ++$issued;
             push @active, $tx;
+            $peak_active = @active if @active > $peak_active;
         }
 
         $service_once->($hard_deadline);
@@ -318,8 +323,10 @@ sub run_requests {
     }
 
     return {
-        elapsed       => time() - $start,
-        credit_stalls => $credit_stalls,
+        elapsed            => time() - $start,
+        credit_stalls      => $credit_stalls,
+        peak_active        => $peak_active,
+        first_stall_active => $first_stall_active,
     };
 }
 
@@ -343,13 +350,15 @@ print "requests_per_case=$requests\n";
 print "warmup_requests=$warmup\n";
 print "response_body_bytes=$body_bytes\n";
 print "\n";
-printf "%-12s %-12s %-12s %-16s %-18s %-14s\n",
+printf "%-12s %-12s %-12s %-16s %-18s %-14s %-12s %-12s\n",
     'concurrency',
     'requests',
     'seconds',
     'requests/sec',
     'payload MiB/sec',
-    'credit stalls';
+    'credit stalls',
+    'peak active',
+    'first stall';
 
 my $response_body = 'x' x $body_bytes;
 
@@ -375,13 +384,17 @@ for my $concurrency (@concurrency) {
     my $mib_per_second =
         ($requests * $body_bytes) / (1024 * 1024) / $elapsed;
 
-    printf "%-12d %-12d %-12.6f %-16.2f %-18.2f %-14d\n",
+    printf "%-12d %-12d %-12.6f %-16.2f %-18.2f %-14d %-12d %-12s\n",
         $concurrency,
         $requests,
         $elapsed,
         $requests_per_second,
         $mib_per_second,
-        $result->{credit_stalls};
+        $result->{credit_stalls},
+        $result->{peak_active},
+        defined($result->{first_stall_active})
+            ? $result->{first_stall_active}
+            : '-';
 
     close_context($ctx);
 }
