@@ -2879,7 +2879,7 @@ sub _promote_accepted_early_transactions {
 
     return unless $self->{role} eq 'server';
     return unless $self->{quic}->ready;
-    return unless $self->{quic}->early_data_status eq 'accepted';
+    return if $self->{quic}->early_data_status eq 'rejected';
     return unless @{ $self->{pending_early_transactions} };
 
     my @pending =
@@ -2966,7 +2966,7 @@ sub _sync_early_data_status {
     if ($self->{role} eq 'server') {
         if ($status eq 'rejected') {
             $self->_reject_pending_early_transactions;
-        } elsif ($status eq 'accepted' && $self->{quic}->ready) {
+        } elsif ($self->{quic}->ready) {
             $self->_promote_accepted_early_transactions;
         }
     }
