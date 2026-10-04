@@ -87,7 +87,7 @@ sub measure_buffered_cycle {
         response                 => $response,
         response_receive_mode    => 'buffered',
         response_buffered_body   => '',
-        response_buffered_tail   => '',
+        response_buffered_chunks => [],
         response_buffered_bytes  => 0,
         response_buffered_seen   => 0,
     }, 'Unblock::HTTP3::Transaction';
@@ -296,7 +296,7 @@ for my $size (@sizes) {
 
     my $buffered = bless {
         response_buffered_body  => '',
-        response_buffered_tail  => '',
+        response_buffered_chunks => [],
         response_buffered_bytes => 0,
         response_buffered_seen  => 0,
     }, 'Unblock::HTTP3::Transaction';
@@ -397,7 +397,7 @@ for my $size (@sizes) {
                 response                 => $response,
                 response_receive_mode    => 'buffered',
                 response_buffered_body   => '',
-                response_buffered_tail   => '',
+                response_buffered_chunks => [],
                 response_buffered_bytes  => 0,
                 response_buffered_seen   => 0,
             }, 'Unblock::HTTP3::Transaction';
