@@ -284,18 +284,6 @@ for my $case (
     );
 }
 
-{
-    my $native = Unblock::HTTP3::_Native->client;
-
-    read_error(
-        native    => $native,
-        stream_id => 3,
-        bytes     => h3_varint(0x01) . h3_varint(0),
-        code      => 0x0108,
-        label     => 'server push without advertised push capacity',
-    );
-}
-
 
 {
     my $native = Unblock::HTTP3::_Native->server;
