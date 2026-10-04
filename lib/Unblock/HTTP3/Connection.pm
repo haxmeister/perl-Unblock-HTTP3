@@ -3,9 +3,9 @@ package Unblock::HTTP3::Connection;
 use strict;
 use warnings;
 use Carp qw(croak);
-use Uniform::HTTP::FastPath 0.05 ();
-use Uniform::HTTP::Request 0.05 ();
-use Uniform::HTTP::Response 0.05 ();
+use Uniform::HTTP::FastPath 0.06 ();
+use Uniform::HTTP::Request 0.06 ();
+use Uniform::HTTP::Response 0.06 ();
 use Scalar::Util qw(blessed weaken);
 use Time::HiRes ();
 
@@ -1878,26 +1878,14 @@ sub _send_informational_response {
         'send_informational()',
     );
 
-    my $view = Uniform::HTTP::FastPath::view($response);
-    my @fields = (
-        [
-            ':status',
-            "" . $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
-        ],
-        @{ _wire_headers(
-            $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
-            'response',
-        ) },
-    );
-
-    $self->_assert_peer_field_section_size(
-        \@fields,
+    $self->_assert_peer_field_section_size_value(
+        $self->{native}->uniform_response_field_section_size($response),
         'send_informational()',
     );
 
-    $self->{native}->submit_info(
+    $self->{native}->submit_uniform_info(
         $transaction->stream_id,
-        \@fields,
+        $response,
     );
 
     $response->freeze;
@@ -4138,10 +4126,9 @@ sub _field_section_size {
     return $size;
 }
 
-sub _assert_peer_field_section_size {
-    my ($self, $fields, $operation) = @_;
+sub _assert_peer_field_section_size_value {
+    my ($self, $size, $operation) = @_;
 
-    my $size = _field_section_size($fields);
     my $limit = $self->{peer_max_field_section_size};
 
     croak "$operation: field section size $size exceeds peer "
@@ -4149,6 +4136,15 @@ sub _assert_peer_field_section_size {
         if _decimal_less_than($limit, $size);
 
     return $size;
+}
+
+sub _assert_peer_field_section_size {
+    my ($self, $fields, $operation) = @_;
+
+    return $self->_assert_peer_field_section_size_value(
+        _field_section_size($fields),
+        $operation,
+    );
 }
 
 sub _wire_headers {
@@ -4207,79 +4203,23 @@ sub _submit_request {
         unless $self->{started};
     croak 'request must be a canonical Uniform::HTTP::Request'
         unless ref($request) eq 'Uniform::HTTP::Request';
-
-    my $view = Uniform::HTTP::FastPath::view($request);
-    my $method = $view->[Uniform::HTTP::FastPath::SLOT_METHOD()];
-    my $target = $view->[Uniform::HTTP::FastPath::SLOT_TARGET()];
-    my $scheme = $view->[Uniform::HTTP::FastPath::SLOT_SCHEME()];
-    my $authority = $view->[Uniform::HTTP::FastPath::SLOT_AUTHORITY()];
-    my $protocol = $view->[Uniform::HTTP::FastPath::SLOT_PROTOCOL()];
-    my $headers = $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()];
-    my $trailers = $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()];
-    my $flags = $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()];
-
-    my $is_connect = $method eq 'CONNECT' ? 1 : 0;
-    my $is_extended_connect =
-        $is_connect && defined($protocol) ? 1 : 0;
-
-    if ($is_connect) {
-        croak 'HTTP/3 CONNECT request requires authority'
-            unless defined $authority;
-        croak 'HTTP/3 peer did not enable Extended CONNECT'
-            if $is_extended_connect
-                && !$self->{peer_enable_connect_protocol};
-    } else {
-        croak 'HTTP/3 request requires scheme'
-            unless defined $scheme;
-        croak 'HTTP/3 request requires authority'
-            unless defined $authority;
-    }
     croak 'HTTP/3 peer has begun graceful shutdown'
         if defined $self->{remote_shutdown_id};
     croak 'HTTP/3 connection is shutting down'
         if $self->{shutdown_notice_sent} || $self->{shutdown_started};
 
-    my $wire_headers = _wire_headers($headers, 'request');
-    my @fields;
-
-    if ($is_extended_connect) {
-        @fields = (
-            [ ':method',    'CONNECT' ],
-            [ ':protocol',  $protocol ],
-            [ ':scheme',    $scheme ],
-            [ ':authority', $authority ],
-            [ ':path',      $target ],
-            @$wire_headers,
-        );
-    } elsif ($is_connect) {
-        @fields = (
-            [ ':method',    'CONNECT' ],
-            [ ':authority', $authority ],
-            @$wire_headers,
-        );
-    } else {
-        @fields = (
-            [ ':method',    $method ],
-            [ ':scheme',    $scheme ],
-            [ ':authority', $authority ],
-            [ ':path',      $target ],
-            @$wire_headers,
-        );
-    }
-
-    $self->_assert_peer_field_section_size(
-        \@fields,
+    $self->_assert_peer_field_section_size_value(
+        $self->{native}->uniform_request_field_section_size($request),
         'request()',
     );
 
-    my $wire_trailers = @$trailers
-        ? _wire_trailers($trailers)
-        : undef;
+    my $trailer_size =
+        $self->{native}->uniform_trailer_field_section_size($request);
 
-    $self->_assert_peer_field_section_size(
-        $wire_trailers,
+    $self->_assert_peer_field_section_size_value(
+        $trailer_size,
         'request trailers',
-    ) if defined $wire_trailers;
+    ) if $trailer_size;
 
     my $stream = $self->{quic}->open_bidi_stream;
     return unless defined $stream;
@@ -4288,24 +4228,12 @@ sub _submit_request {
     $self->{streams}{$id} = $stream;
 
     $streaming = $streaming ? 1 : 0;
-    my $wire_body =
-        $flags & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()
-            ? $view->[Uniform::HTTP::FastPath::SLOT_BODY()]
-            : (!$streaming && @$trailers ? '' : undef);
 
-    $self->{native}->submit_request(
+    $self->{native}->submit_uniform_request(
         $id,
-        \@fields,
-        $wire_body,
+        $request,
         $streaming,
     );
-
-    if (defined $wire_trailers) {
-        $self->{native}->submit_trailers(
-            $id,
-            $wire_trailers,
-        );
-    }
 
     $request->freeze;
     $self->{outgoing}{$id} = $request;
@@ -4327,62 +4255,34 @@ sub _submit_response {
     croak 'unknown HTTP/3 request stream'
         unless defined $self->{streams}{$stream_id};
 
-    my $view = Uniform::HTTP::FastPath::view($response);
-    my $headers = $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()];
-    my $trailers = $view->[Uniform::HTTP::FastPath::SLOT_TRAILERS()];
-    my $flags = $view->[Uniform::HTTP::FastPath::SLOT_FLAGS()];
-
-    my @fields = (
-        [
-            ':status',
-            "" . $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
-        ],
-        @{ _wire_headers($headers, 'response') },
-    );
-
-    $self->_assert_peer_field_section_size(
-        \@fields,
+    $self->_assert_peer_field_section_size_value(
+        $self->{native}->uniform_response_field_section_size($response),
         'send_response()',
     );
 
-    my $wire_trailers = @$trailers
-        ? _wire_trailers($trailers)
-        : undef;
+    my $trailer_size =
+        $self->{native}->uniform_trailer_field_section_size($response);
 
-    $self->_assert_peer_field_section_size(
-        $wire_trailers,
+    $self->_assert_peer_field_section_size_value(
+        $trailer_size,
         'response trailers',
-    ) if defined $wire_trailers;
+    ) if $trailer_size;
 
     my $transaction = $self->{transactions}{$stream_id};
     my $streaming = defined($transaction)
         && $transaction->_response_is_streaming
         ? 1
         : 0;
-    my $wire_body =
-        $flags & Uniform::HTTP::FastPath::FLAG_HAS_BUFFERED_BODY()
-            ? $view->[Uniform::HTTP::FastPath::SLOT_BODY()]
-            : (!$streaming && @$trailers ? '' : undef);
 
-    $self->{native}->submit_response(
+    $self->{native}->submit_uniform_response(
         $stream_id,
-        \@fields,
-        $wire_body,
+        $response,
         $streaming,
     );
 
-    if (defined $wire_trailers) {
-        $self->{native}->submit_trailers(
-            $stream_id,
-            $wire_trailers,
-        );
-    }
-
     $response->freeze;
-    $self->{outgoing}{$stream_id} = $response;
 
     $self->_drain_output;
-
     return $response;
 }
 
