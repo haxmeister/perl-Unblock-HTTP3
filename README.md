@@ -328,9 +328,9 @@ my $tx = $h3->request(
 request if QUIC rejects it.
 
 On the server, early request bytes can be parsed before the handshake finishes,
-but the Transaction is not exposed to application code until QUIC accepts the
-early data and the handshake completes. Early HTTP Datagrams are bounded and
-held with the Transaction until that point. This is the safe default required
+but the Transaction is not exposed to application code until the QUIC
+handshake completes and the early data has not been rejected. Early HTTP
+Datagrams are bounded and held with the Transaction until that point. This is the safe default required
 by the HTTP early-data replay rules.
 
 See `Unblock::HTTP3::Connection` and `docs/ARCHITECTURE.md` for the complete
@@ -355,6 +355,9 @@ queues, field sections, QPACK, and HTTP Datagram queues.
 
 Protocol errors are kept at the narrowest correct scope when possible. A bad
 request stream does not automatically destroy unrelated multiplexed requests.
+
+The normative coverage audit and native-library boundaries are documented in
+`docs/RFC-COMPLIANCE.md`.
 
 ## Extensions
 
