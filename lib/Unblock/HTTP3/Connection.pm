@@ -3534,7 +3534,12 @@ sub _drain_events {
         if ($type eq 'end_trailers') {
             delete $self->{trailer_field_section_size}{$id};
             my $message = $self->{messages}{$id};
-            $message->freeze_trailers if defined $message;
+
+            if (defined $message) {
+                _coalesce_trailer_cookie_fields($message);
+                $message->freeze_trailers;
+            }
+
             next;
         }
 
@@ -3551,6 +3556,52 @@ sub _drain_events {
     }
 
     return;
+}
+
+sub _coalesce_cookie_fields {
+    my ($fields) = @_;
+
+    my @cookie_values = map {
+        $_->[1]
+    } grep {
+        $_->[0] eq 'cookie'
+    } @$fields;
+
+    return $fields if @cookie_values < 2;
+
+    my @normalized;
+    my $inserted;
+
+    for my $field (@$fields) {
+        if ($field->[0] eq 'cookie') {
+            if (!$inserted) {
+                push @normalized, [
+                    'cookie',
+                    join('; ', @cookie_values),
+                ];
+                $inserted = 1;
+            }
+            next;
+        }
+
+        push @normalized, $field;
+    }
+
+    return \@normalized;
+}
+
+sub _coalesce_trailer_cookie_fields {
+    my ($message) = @_;
+
+    my $values = $message->trailer_values('cookie');
+    return unless @$values > 1;
+
+    $message->trailer(
+        'cookie',
+        join('; ', @$values),
+    );
+
+    return 1;
 }
 
 sub _received_message_flags {
@@ -3589,7 +3640,7 @@ sub _received_request {
         $args->{protocol},
         undef,
         undef,
-        $args->{headers},
+        _coalesce_cookie_fields($args->{headers}),
         [],
         undef,
     ];
@@ -3612,7 +3663,7 @@ sub _received_response {
         undef,
         $status,
         undef,
-        $headers,
+        _coalesce_cookie_fields($headers),
         [],
         undef,
     ];
