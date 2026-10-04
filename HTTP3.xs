@@ -1842,6 +1842,7 @@ unblock_http3_uniform_add_section(
         const char *value;
         uint8_t *lower = NULL;
         size_t j;
+        int needs_lower = 0;
 
         if (
             !uhttp_native_field_at(
@@ -1857,27 +1858,32 @@ unblock_http3_uniform_add_section(
         name = SvPVbyte(name_sv, namelen);
         value = SvPVbyte(value_sv, valuelen);
 
-        Newx(lower, namelen ? namelen : 1, uint8_t);
-
         for (j = 0; j < (size_t)namelen; ++j) {
             uint8_t ch = (uint8_t)name[j];
 
             if (ch >= 'A' && ch <= 'Z') {
-                ch = (uint8_t)(ch + ('a' - 'A'));
+                needs_lower = 1;
+                break;
             }
-
-            lower[j] = ch;
         }
 
-        unblock_http3_validate_uniform_field(
-            context,
-            lower,
-            (size_t)namelen,
-            (const uint8_t *)value,
-            (size_t)valuelen
-        );
+        if (needs_lower) {
+            Newx(lower, namelen ? namelen : 1, uint8_t);
 
-        out->nva[*index].name = lower;
+            for (j = 0; j < (size_t)namelen; ++j) {
+                uint8_t ch = (uint8_t)name[j];
+
+                if (ch >= 'A' && ch <= 'Z') {
+                    ch = (uint8_t)(ch + ('a' - 'A'));
+                }
+
+                lower[j] = ch;
+            }
+
+            out->nva[*index].name = lower;
+        } else {
+            out->nva[*index].name = (const uint8_t *)name;
+        }
         out->nva[*index].namelen = (size_t)namelen;
         out->nva[*index].value = (const uint8_t *)value;
         out->nva[*index].valuelen = (size_t)valuelen;
@@ -2037,6 +2043,10 @@ unblock_http3_uniform_request_fields(
         &is_connect,
         &is_extended
     );
+    unblock_http3_uniform_validate_section(
+        aTHX_ &view->headers,
+        0
+    );
 
     pseudo_count = is_extended ? 5 : (is_connect ? 2 : 4);
 
@@ -2133,6 +2143,10 @@ unblock_http3_uniform_response_fields(
     }
 
     snprintf(status_buffer, 4, "%ld", (long)status);
+    unblock_http3_uniform_validate_section(
+        aTHX_ &view->headers,
+        1
+    );
 
     Zero(out, 1, unblock_http3_uniform_fields);
     out->nvlen = 1 + (size_t)header_count;
@@ -2166,6 +2180,10 @@ unblock_http3_uniform_trailer_fields(
     );
     size_t index = 0;
 
+    unblock_http3_uniform_validate_section(
+        aTHX_ &view->trailers,
+        2
+    );
     Zero(out, 1, unblock_http3_uniform_fields);
     out->nvlen = (size_t)count;
 
