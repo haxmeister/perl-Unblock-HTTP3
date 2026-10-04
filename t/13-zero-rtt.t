@@ -290,8 +290,9 @@ my $early_request = Uniform::HTTP::Request->new(
 
 my $early_client_tx = $second_client_h3->request(
     $early_request,
-    early_data => 1,
-    datagrams  => 1,
+    early_data  => 1,
+    datagrams   => 1,
+    stream_body => {},
 );
 
 ok($early_client_tx->early_data,
@@ -301,10 +302,9 @@ my $second_server_quic;
 ok(
     run_until(sub {
         $second_server_quic ||= $server_driver->next_connection;
-        return defined $second_server_quic
-            && $second_server_quic->early_data_status ne 'none';
+        return defined $second_server_quic;
     }),
-    'server accepts the returning QUIC connection and observes early data',
+    'server accepts the returning QUIC connection',
 );
 
 my $second_server_h3 = h3_server(
@@ -342,6 +342,8 @@ ok(
 );
 is($early_datagram, 'early-http-datagram',
     '0-RTT HTTP Datagram payload is preserved');
+
+$early_client_tx->request_body->complete;
 
 ok(
     run_until(sub {

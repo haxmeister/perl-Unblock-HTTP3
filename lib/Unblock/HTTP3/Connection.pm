@@ -2482,43 +2482,10 @@ sub drained {
     return $self->{native}->is_drained ? 1 : 0;
 }
 
-sub start {
+sub _bind_local_streams {
     my ($self) = @_;
 
-    if ($self->{started}) {
-        $self->_sync_early_data_status;
-        return $self;
-    }
-
-    my $ready = $self->{quic}->ready ? 1 : 0;
-    my $early_status = $self->{quic}->early_data_status;
-
-    if (!$ready) {
-        if ($self->{role} eq 'client') {
-            croak 'cannot start HTTP/3 0-RTT without remembered_peer_settings'
-                unless defined $self->{remembered_peer_settings};
-            croak "cannot start HTTP/3 before QUIC is ready unless 0-RTT is pending"
-                unless $early_status eq 'pending';
-        } else {
-            croak 'cannot start HTTP/3 server 0-RTT without remembered_local_settings'
-                unless defined $self->{remembered_local_settings};
-            croak "cannot start HTTP/3 server before QUIC is ready unless 0-RTT is accepted"
-                unless $early_status eq 'accepted'
-                    || $early_status eq 'pending';
-        }
-
-        $self->{early_data_started} = 1;
-    } elsif (
-        $self->{role} eq 'server'
-        && $early_status eq 'accepted'
-        && !defined($self->{remembered_local_settings})
-    ) {
-        croak 'accepted QUIC 0-RTT requires remembered_local_settings for HTTP/3';
-    }
-
-    if (!defined $self->{quic}->send_buffer_limit) {
-        $self->{quic}->send_buffer_limit($self->{send_buffer_limit});
-    }
+    return 1 if defined $self->{control_stream_id};
 
     my $control = $self->{quic}->open_uni_stream;
     my $qenc = $self->{quic}->open_uni_stream;
@@ -2540,6 +2507,52 @@ sub start {
     $self->{control_stream_id} = $control->id;
     $self->{qpack_encoder_stream_id} = $qenc->id;
     $self->{qpack_decoder_stream_id} = $qdec->id;
+    return 1;
+}
+
+sub start {
+    my ($self) = @_;
+
+    if ($self->{started}) {
+        $self->_sync_early_data_status;
+        return $self;
+    }
+
+    my $ready = $self->{quic}->ready ? 1 : 0;
+    my $early_status = $self->{quic}->early_data_status;
+
+    if (!$ready) {
+        if ($self->{role} eq 'client') {
+            croak 'cannot start HTTP/3 0-RTT without remembered_peer_settings'
+                unless defined $self->{remembered_peer_settings};
+            croak "cannot start HTTP/3 before QUIC is ready unless 0-RTT is pending"
+                unless $early_status eq 'pending';
+        } else {
+            croak 'cannot start HTTP/3 server before QUIC is ready without remembered_local_settings'
+                unless defined $self->{remembered_local_settings};
+        }
+
+        $self->{early_data_started} = 1;
+    } elsif (
+        $self->{role} eq 'server'
+        && $early_status eq 'accepted'
+        && !defined($self->{remembered_local_settings})
+    ) {
+        croak 'accepted QUIC 0-RTT requires remembered_local_settings for HTTP/3';
+    }
+
+    if (!defined $self->{quic}->send_buffer_limit) {
+        $self->{quic}->send_buffer_limit($self->{send_buffer_limit});
+    }
+
+    # A client sending 0-RTT must send its control and QPACK streams in early
+    # data. A server can receive and parse early request/control streams before
+    # handshake completion, but its own HTTP/3 streams use 1-RTT and are bound
+    # once the QUIC connection becomes ready.
+    if ($ready || $self->{role} eq 'client') {
+        $self->_bind_local_streams;
+    }
+
     $self->{started} = 1;
 
     my $weak = $self;
@@ -2671,6 +2684,14 @@ sub _service {
         && $self->{quic}->early_data_status eq 'rejected';
     return if $restarted;
 
+    if (
+        $self->{role} eq 'server'
+        && $self->{quic}->ready
+        && !defined($self->{control_stream_id})
+    ) {
+        $self->_bind_local_streams;
+    }
+
     if ($self->{servicing}) {
         $self->{service_again} = 1;
         return;
@@ -2703,7 +2724,8 @@ sub _service {
 
             if (!$self->{failed}) {
                 $self->_drain_events;
-                $self->_drain_output;
+                $self->_drain_output
+                    if defined $self->{control_stream_id};
             }
         } while ($self->{service_again} && !$self->{failed});
 
