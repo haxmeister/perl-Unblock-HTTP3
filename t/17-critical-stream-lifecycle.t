@@ -230,6 +230,16 @@ sub make_pair {
     ok(defined($stream), 'raw peer opens QPACK encoder stream');
 
     $stream->send("\x02");
+
+    ok(
+        $pair->{run_until}->(sub {
+            return exists(
+                $pair->{server_h3}{core_uni_streams}{ $stream->id }
+            );
+        }),
+        'HTTP/3 classifies peer QPACK encoder before clean FIN',
+    );
+
     $stream->finish;
 
     ok(
