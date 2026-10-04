@@ -1040,6 +1040,9 @@ sub _new {
         core_uni_streams           => {},
         ignored_uni_streams        => {},
         started                  => 0,
+        early_data_started       => 0,
+        early_data_status        => $quic->early_data_status,
+        early_data_rollback_done => 0,
         failed                  => 0,
         error                   => undef,
         error_code              => undef,
@@ -1077,6 +1080,12 @@ sub nghttp3_version {
     my ($self, @args) = @_;
     croak 'nghttp3_version() does not accept arguments' if @args;
     return Unblock::HTTP3::_Native::nghttp3_version();
+}
+
+sub early_data_status {
+    my ($self, @args) = @_;
+    croak 'early_data_status() does not accept arguments' if @args;
+    return $self->{quic}->early_data_status;
 }
 
 sub started {
@@ -1383,7 +1392,14 @@ sub request {
     my $datagrams = exists $option{datagrams}
         ? delete $option{datagrams}
         : 0;
+    my $early_data = exists $option{early_data}
+        ? delete $option{early_data}
+        : 0;
 
+    croak 'request(): early_data must be 0 or 1'
+        if !defined($early_data)
+            || ref($early_data)
+            || "$early_data" !~ /\A[01]\z/;
     croak 'request(): datagrams must be 0 or 1'
         if !defined($datagrams)
             || ref($datagrams)
@@ -1452,6 +1468,19 @@ sub request {
     croak 'request(): unknown options: ' . join(', ', sort keys %option)
         if %option;
 
+    my $sending_early = !$self->{quic}->ready ? 1 : 0;
+
+    if ($sending_early) {
+        croak 'request(): early_data => 1 is required before QUIC handshake completion'
+            unless $early_data;
+        croak 'request(): HTTP/3 was not started for 0-RTT'
+            unless $self->{early_data_started};
+        croak 'request(): QUIC 0-RTT is not pending'
+            unless $self->{quic}->early_data_status eq 'pending';
+        croak 'request(): remembered peer HTTP/3 settings are required for 0-RTT'
+            unless $self->{peer_settings_initialized};
+    }
+
     $self->_assert_request_semantics(
         $request,
         'request()',
@@ -1477,6 +1506,7 @@ sub request {
         stream_id         => $stream_id,
         request           => $request,
         request_streaming => $request_streaming,
+        early_data        => $sending_early,
     );
 
     $transaction->_enable_datagrams if $datagrams;
@@ -2165,10 +2195,22 @@ sub _receive_quic_datagram {
 
     return if $self->{failed};
 
-    # HTTP/3 0-RTT SETTINGS state is not retained yet. Early DATAGRAMs are
-    # unreliable, so drop them rather than accidentally accepting them under
-    # settings from a previous connection.
-    return if $early_data;
+    if ($early_data) {
+        return if $self->{role} ne 'server';
+
+        if (!defined($self->{remembered_local_settings})) {
+            $self->_fail_connection(
+                $H3_SETTINGS_ERROR,
+                'received HTTP/3 0-RTT DATAGRAM without remembered_local_settings',
+            );
+            return;
+        }
+
+        # An unreliable DATAGRAM can race ahead of the client's 0-RTT
+        # SETTINGS control stream. Drop it until current peer SETTINGS have
+        # actually arrived; there is no safe request association yet.
+        return unless $self->{peer_settings_received};
+    }
 
     if (!$self->{enable_http_datagrams}) {
         $self->_fail_connection(
@@ -2443,10 +2485,36 @@ sub drained {
 sub start {
     my ($self) = @_;
 
-    return $self if $self->{started};
+    if ($self->{started}) {
+        $self->_sync_early_data_status;
+        return $self;
+    }
 
-    croak 'cannot start HTTP/3 before the QUIC connection is ready'
-        unless $self->{quic}->ready;
+    my $ready = $self->{quic}->ready ? 1 : 0;
+    my $early_status = $self->{quic}->early_data_status;
+
+    if (!$ready) {
+        if ($self->{role} eq 'client') {
+            croak 'cannot start HTTP/3 0-RTT without remembered_peer_settings'
+                unless defined $self->{remembered_peer_settings};
+            croak "cannot start HTTP/3 before QUIC is ready unless 0-RTT is pending"
+                unless $early_status eq 'pending';
+        } else {
+            croak 'cannot start HTTP/3 server 0-RTT without remembered_local_settings'
+                unless defined $self->{remembered_local_settings};
+            croak "cannot start HTTP/3 server before QUIC is ready unless 0-RTT is accepted"
+                unless $early_status eq 'accepted'
+                    || $early_status eq 'pending';
+        }
+
+        $self->{early_data_started} = 1;
+    } elsif (
+        $self->{role} eq 'server'
+        && $early_status eq 'accepted'
+        && !defined($self->{remembered_local_settings})
+    ) {
+        croak 'accepted QUIC 0-RTT requires remembered_local_settings for HTTP/3';
+    }
 
     if (!defined $self->{quic}->send_buffer_limit) {
         $self->{quic}->send_buffer_limit($self->{send_buffer_limit});
@@ -2495,6 +2563,96 @@ sub start {
     return $self;
 }
 
+sub _reset_peer_settings_to_defaults {
+    my ($self) = @_;
+
+    $self->{peer_max_field_section_size} = $HTTP3_MAX_VARINT;
+    $self->{peer_enable_connect_protocol} = 0;
+    $self->{peer_h3_datagram} = 0;
+    $self->{peer_extension_settings} = {};
+    $self->{peer_settings_wire} = {};
+    $self->{peer_settings_received} = 0;
+    $self->{peer_settings_initialized} = 0;
+    $self->{pending_peer_settings} = undef;
+    $self->{pending_peer_extension_settings} = undef;
+    $self->{peer_settings_parser} = {};
+    return;
+}
+
+sub _rollback_rejected_early_data {
+    my ($self) = @_;
+
+    return if $self->{early_data_rollback_done};
+    return unless $self->{role} eq 'client';
+    return unless $self->{early_data_started};
+    return unless $self->{quic}->early_data_status eq 'rejected';
+    return unless $self->{quic}->ready;
+
+    for my $transaction (values %{ $self->{transactions} }) {
+        next if $transaction->is_terminal;
+        $transaction->_mark_error(
+            'QUIC 0-RTT was rejected; retry the request only if it is replay-safe',
+        );
+    }
+
+    $self->{transactions} = {};
+    $self->{ready_transactions} = [];
+    $self->{ready_informational} = [];
+    $self->{streams} = {};
+    $self->{messages} = {};
+    $self->{outgoing} = {};
+    $self->{stream_lifecycle} = {};
+    $self->{building} = {};
+    $self->{trailer_field_section_size} = {};
+    $self->{output_finished} = {};
+    $self->{response_sent} = {};
+    $self->{body_bytes_sent} = {};
+    $self->{rejected_streams} = {};
+    $self->{peer_uni_probe} = {};
+    $self->{core_uni_streams} = {};
+    $self->{ignored_uni_streams} = {};
+    $self->{extension_stream_objects} = {};
+    $self->{control_settings_rewritten} = 0;
+    $self->{control_settings_delta} = 0;
+    $self->{control_settings_pending} = undef;
+
+    $self->{native} = Unblock::HTTP3::_Native->client(
+        $self->{max_field_section_size},
+        $self->{qpack_max_table_capacity},
+        $self->{qpack_blocked_streams},
+        0,
+        $self->{enable_http_datagrams},
+    );
+
+    $self->_reset_peer_settings_to_defaults;
+
+    $self->{started} = 0;
+    $self->{early_data_started} = 0;
+    $self->{early_data_rollback_done} = 1;
+    $self->{early_data_status} = 'rejected';
+
+    $self->start;
+    return 1;
+}
+
+sub _sync_early_data_status {
+    my ($self) = @_;
+
+    my $status = $self->{quic}->early_data_status;
+    my $previous = $self->{early_data_status};
+    $self->{early_data_status} = $status;
+
+    if (
+        $self->{role} eq 'client'
+        && $self->{early_data_started}
+        && $status eq 'rejected'
+    ) {
+        return $self->_rollback_rejected_early_data;
+    }
+
+    return 0;
+}
+
 sub _now_ns {
     return int(
         Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC())
@@ -2507,6 +2665,11 @@ sub _service {
 
     return unless $self->{started};
     return if $self->{failed};
+
+    my $restarted = $self->_sync_early_data_status;
+    return if !$self->{quic}->ready
+        && $self->{quic}->early_data_status eq 'rejected';
+    return if $restarted;
 
     if ($self->{servicing}) {
         $self->{service_again} = 1;
@@ -3267,11 +3430,23 @@ sub _finish_headers {
             $datagrams = $self->{datagram_request}->($self, $message) ? 1 : 0;
         }
 
+        my $stream = $self->{streams}{$id};
+        my $stream_is_early = defined($stream) && $stream->early_data ? 1 : 0;
+
+        if ($stream_is_early && !defined($self->{remembered_local_settings})) {
+            $self->_fail_connection(
+                $H3_SETTINGS_ERROR,
+                'received HTTP/3 0-RTT request without remembered_local_settings',
+            );
+            return;
+        }
+
         my $transaction = Unblock::HTTP3::Transaction->_new(
             connection => $self,
             stream_id  => $id,
             request    => $message,
             response   => $response,
+            early_data => $stream_is_early,
         );
 
         $transaction->_enable_datagrams if $datagrams;

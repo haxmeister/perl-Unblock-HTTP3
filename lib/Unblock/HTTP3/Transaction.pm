@@ -22,6 +22,7 @@ sub _new {
     my $request    = delete $args{request};
     my $response   = delete $args{response};
     my $request_streaming = delete $args{request_streaming} ? 1 : 0;
+    my $early_data = delete $args{early_data} ? 1 : 0;
 
     croak 'Transaction requires a Unblock::HTTP3::Connection'
         unless blessed($connection)
@@ -53,6 +54,7 @@ sub _new {
         request_receive_options  => {},
         response_receive_options => {},
         request_streaming         => $request_streaming,
+        early_data                => $early_data,
         response_streaming        => 0,
         request_buffered_body     => '',
         request_buffered_seen     => 0,
@@ -73,6 +75,12 @@ sub _new {
     weaken($self->{connection});
 
     return $self;
+}
+
+sub early_data {
+    my ($self, @args) = @_;
+    croak 'early_data() does not accept arguments' if @args;
+    return $self->{early_data} ? 1 : 0;
 }
 
 sub stream_id {
