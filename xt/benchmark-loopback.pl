@@ -249,6 +249,7 @@ sub run_requests {
 
     my $issued = 0;
     my $completed = 0;
+    my $credit_stalls = 0;
     my @active;
 
     my $hard_deadline = time() + 120;
@@ -259,19 +260,23 @@ sub run_requests {
             if time() >= $hard_deadline;
 
         while ($issued < $count && @active < $concurrency) {
-            ++$issued;
+            my $next_id = $issued + 1;
 
             my $request = Uniform::HTTP::Request->new(
                 method    => 'GET',
-                target    => "/bench/$issued",
+                target    => "/bench/$next_id",
                 scheme    => 'https',
                 authority => 'localhost',
             );
 
             my $tx = $client_h3->request($request);
-            die "failed to create client Transaction\n"
-                unless defined $tx;
 
+            if (!defined $tx) {
+                ++$credit_stalls;
+                last;
+            }
+
+            ++$issued;
             push @active, $tx;
         }
 
@@ -312,7 +317,10 @@ sub run_requests {
             if $server_h3->failed;
     }
 
-    return time() - $start;
+    return {
+        elapsed       => time() - $start,
+        credit_stalls => $credit_stalls,
+    };
 }
 
 sub close_context {
@@ -335,12 +343,13 @@ print "requests_per_case=$requests\n";
 print "warmup_requests=$warmup\n";
 print "response_body_bytes=$body_bytes\n";
 print "\n";
-printf "%-12s %-12s %-12s %-16s %-18s\n",
+printf "%-12s %-12s %-12s %-16s %-18s %-14s\n",
     'concurrency',
     'requests',
     'seconds',
     'requests/sec',
-    'payload MiB/sec';
+    'payload MiB/sec',
+    'credit stalls';
 
 my $response_body = 'x' x $body_bytes;
 
@@ -354,23 +363,25 @@ for my $concurrency (@concurrency) {
         $response_body,
     ) if $warmup;
 
-    my $elapsed = run_requests(
+    my $result = run_requests(
         $ctx,
         $requests,
         $concurrency,
         $response_body,
     );
 
+    my $elapsed = $result->{elapsed};
     my $requests_per_second = $requests / $elapsed;
     my $mib_per_second =
         ($requests * $body_bytes) / (1024 * 1024) / $elapsed;
 
-    printf "%-12d %-12d %-12.6f %-16.2f %-18.2f\n",
+    printf "%-12d %-12d %-12.6f %-16.2f %-18.2f %-14d\n",
         $concurrency,
         $requests,
         $elapsed,
         $requests_per_second,
-        $mib_per_second;
+        $mib_per_second,
+        $result->{credit_stalls};
 
     close_context($ctx);
 }
