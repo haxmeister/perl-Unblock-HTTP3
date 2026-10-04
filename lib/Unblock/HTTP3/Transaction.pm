@@ -8,6 +8,7 @@ use Scalar::Util qw(blessed weaken);
 
 use Uniform::HTTP::Request 0.04 ();
 use Unblock::HTTP3 ();
+use Unblock::HTTP3::Request ();
 
 our $VERSION = '0.01';
 

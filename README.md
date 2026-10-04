@@ -28,9 +28,9 @@ an event loop.
 
 Uniform::HTTP 0.04 is the runtime message layer for Unblock::HTTP3.
 
-C<Unblock::HTTP3::Request> and C<Unblock::HTTP3::Response> are thin subclasses
+`Unblock::HTTP3::Request` and `Unblock::HTTP3::Response` are thin subclasses
 of the canonical Uniform request and response classes. A plain
-C<Uniform::HTTP::Request> can also be submitted directly. Uniform owns common
+`Uniform::HTTP::Request` can also be submitted directly. Uniform owns common
 HTTP semantics such as headers, trailers, buffered bodies, request routing
 metadata, Extended CONNECT protocol metadata, fidelity, mutability, and
 completeness. Unblock owns HTTP/3 transport and stream state.
@@ -94,7 +94,7 @@ This keeps libnghttp3's request-ID validation synchronized with QUIC; Net::QUIC
 still owns the actual stream limit and MAX_STREAMS transport behavior.
 
 A client request returns a Transaction. The request may be a plain
-C<Uniform::HTTP::Request>:
+`Uniform::HTTP::Request`:
 
     my $request = Uniform::HTTP::Request->new(
         method    => 'GET',

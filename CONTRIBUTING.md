@@ -11,9 +11,9 @@ Install the released dependencies from CPAN, then build normally:
     make
     make test
 
-Unblock::HTTP3 is tested against released CPAN versions of Net::QUIC and
-Alien::nghttp3. Do not replace those dependencies with Git checkouts when
-testing a release.
+Unblock::HTTP3 is tested against released CPAN versions of Net::QUIC,
+Alien::nghttp3, and Uniform::HTTP. Do not replace those dependencies with Git
+checkouts when testing a release.
 
 ## Project scope
 

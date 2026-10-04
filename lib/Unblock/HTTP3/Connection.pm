@@ -3496,8 +3496,9 @@ Unblock::HTTP3::Connection - HTTP/3 state over one Net::QUIC connection
 
 One C<Unblock::HTTP3::Connection> wraps one C<Net::QUIC::Connection>.
 
-Unblock::HTTP3 owns HTTP/3 and QPACK state. Net::QUIC owns QUIC and TLS. The UDP
-socket, timer, and event loop remain outside both modules.
+Unblock::HTTP3 owns HTTP/3 and QPACK state. Uniform::HTTP 0.04 supplies common
+HTTP message semantics. Net::QUIC owns QUIC and TLS. The UDP socket, timer, and
+event loop remain outside these modules.
 
 =head1 CONSTRUCTORS
 
@@ -3651,6 +3652,11 @@ Client only.
     my $tx = $h3->request($request);
 
 Returns a L<Unblock::HTTP3::Transaction>.
+
+C<$request> may be a plain L<Uniform::HTTP::Request> or an
+L<Unblock::HTTP3::Request>. Unblock::HTTP3 validates the Uniform request for
+HTTP/3 when it is submitted and freezes its represented message values after
+the wire snapshot has been accepted.
 
 For an outgoing streaming request body:
 

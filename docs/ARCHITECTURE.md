@@ -55,12 +55,12 @@ ngtcp2 and TLS remain below Net::QUIC.
 
 Uniform::HTTP 0.04 is the runtime HTTP message layer.
 
-C<Unblock::HTTP3::Request> is a thin subclass of C<Uniform::HTTP::Request>.
-C<Unblock::HTTP3::Response> is a thin subclass of
-C<Uniform::HTTP::Response>. They inherit the common message implementation
+`Unblock::HTTP3::Request` is a thin subclass of `Uniform::HTTP::Request`.
+`Unblock::HTTP3::Response` is a thin subclass of
+`Uniform::HTTP::Response`. They inherit the common message implementation
 instead of copying it.
 
-A client may also submit a plain C<Uniform::HTTP::Request> directly.
+A client may also submit a plain `Uniform::HTTP::Request` directly.
 Unblock::HTTP3 validates the request for HTTP/3 when it is sent. This keeps
 Uniform neutral: it can represent temporarily incomplete or cross-field-invalid
 message combinations while the selected protocol engine remains responsible
@@ -112,7 +112,7 @@ Receive data follows this path:
 
 For buffered input, receive credit is returned immediately after DATA is
 copied into Transaction-owned accumulation state. Partial bytes are not exposed
-through C<Uniform::HTTP::Message::body>. When the message ends, the complete
+through `Uniform::HTTP::Message::body`. When the message ends, the complete
 buffer is installed in the Uniform message in one operation.
 
 For streaming input, DATA stays outside the Uniform message and receive credit
@@ -473,9 +473,9 @@ The real loopback suite currently proves:
 23. SETTINGS_H3_DATAGRAM negotiation over Net::QUIC 0.04
 24. bidirectional HTTP Datagram routing by Quarter Stream ID
 25. HTTP Datagram callbacks, zero-length payloads, and H3_DATAGRAM_ERROR
-23. RFC 9218 initial and live priority updates
-24. bodyless response semantics
-25. outgoing Content-Length validation
-26. completed stream and native-body cleanup
+26. RFC 9218 initial and live priority updates
+27. bodyless response semantics
+28. outgoing Content-Length validation
+29. completed stream and native-body cleanup
 
 All dependency modules are installed from CPAN.

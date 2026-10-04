@@ -1232,6 +1232,65 @@ ok(
 is($uniform_client_tx->response->status, 204,
     'plain Uniform request receives its HTTP/3 response');
 
+my $uniform_stream_request = Uniform::HTTP::Request->new(
+    method    => 'POST',
+    target    => '/uniform-stream',
+    scheme    => 'https',
+    authority => 'localhost',
+);
+
+my $uniform_stream_client_tx = $client_h3->request(
+    $uniform_stream_request,
+    stream_body => {},
+);
+my $uniform_stream_writer = $uniform_stream_client_tx->request_body;
+
+ok(!$uniform_stream_request->is_complete,
+    'plain Uniform Request tracks externally managed streaming progress');
+
+$uniform_stream_writer->write('partial-');
+
+my $uniform_stream_server_tx;
+
+ok(
+    run_until(sub {
+        $uniform_stream_server_tx ||= $server_h3->next_transaction;
+        return defined $uniform_stream_server_tx;
+    }),
+    'server receives streaming request submitted as a plain Uniform object',
+);
+
+ok(!$uniform_stream_server_tx->request->is_complete,
+    'received streaming Uniform message remains incomplete before FIN');
+ok(!$uniform_stream_server_tx->request->has_buffered_body,
+    'partial network DATA is not exposed as a complete Uniform body');
+
+$uniform_stream_writer->complete('body');
+
+ok(
+    run_until(sub {
+        return $uniform_stream_server_tx->request->is_complete
+            && $uniform_stream_server_tx->request->has_buffered_body;
+    }),
+    'complete buffered body is installed only when the HTTP message ends',
+);
+
+is($uniform_stream_server_tx->request->body, 'partial-body',
+    'Uniform body contains the complete received body');
+ok($uniform_stream_client_tx->request->is_complete,
+    'outgoing Uniform Request becomes complete when body production finishes');
+
+$uniform_stream_server_tx->response->status(204);
+$uniform_stream_server_tx->send_response;
+
+ok(
+    run_until(sub {
+        return $uniform_stream_client_tx->is_complete
+            && $uniform_stream_server_tx->is_complete;
+    }),
+    'streaming plain Uniform request completes cleanly',
+);
+
 my $unnegotiated_extended = Unblock::HTTP3::Request->new(
     method    => 'CONNECT',
     protocol  => 'test-protocol',
