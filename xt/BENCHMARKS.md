@@ -9,6 +9,7 @@ The benchmark suite currently contains:
     xt/benchmark-process-loopback.pl
     xt/benchmark-http3-micro.pl
     xt/benchmark-body-micro.pl
+    xt/benchmark-receive-body.pl
 
 Both measure complete HTTP/3 requests over real loopback UDP, TLS, and QUIC.
 Both endpoints use Unblock::HTTP3, while Net::QUIC provides the transport.
@@ -121,3 +122,35 @@ Environment variables:
 The benchmark verifies native streaming retained bytes return to zero after the
 simulated ACKs. Its purpose is to decide whether body copying is expensive
 enough to justify a more complex retained-buffer design.
+
+
+## Incoming body microbenchmark
+
+The receive-body benchmark isolates the incoming HTTP/3 body path from UDP,
+TLS, QUIC packet processing, and event-loop scheduling.
+
+For each chunk size it measures:
+
+- libnghttp3 DATA parsing through creation and retrieval of the Perl DATA event
+- Transaction buffered-body accumulation
+- Body::Reader polling delivery
+- Body::Reader callback delivery
+- construction and finalization of a complete buffered response
+
+The native DATA case primes a real libnghttp3 request stream once, then feeds
+repeat DATA frames through the normal native read callback. It therefore
+includes the current native DATA-to-Perl ownership copy without including QUIC.
+
+Run it with:
+
+    perl -Iblib/lib -Iblib/arch xt/benchmark-receive-body.pl
+
+Environment variables:
+
+    UNBLOCK_HTTP3_RECEIVE_BENCH_BYTES=33554432
+    UNBLOCK_HTTP3_RECEIVE_BENCH_MAX_ITERATIONS=50000
+    UNBLOCK_HTTP3_RECEIVE_BENCH_SIZES=64,1024,16384,65536,262144,1048576
+
+The benchmark validates byte counts and empty streaming queues, but performance
+numbers are informational only. Shared CI timing is intentionally not used as
+a pass/fail threshold.
