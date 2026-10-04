@@ -321,13 +321,13 @@ $early_client_tx->request_body->complete;
 my $early_server_tx;
 ok(
     run_until(sub {
-        return 0 unless $second_quic->ready
+        $early_server_tx ||= $second_server_h3->next_transaction;
+
+        return defined($early_server_tx)
+            && $second_quic->ready
             && $second_server_quic->ready
             && $second_quic->early_data_status eq 'accepted'
             && $second_client_h3->peer_settings_received;
-
-        $early_server_tx ||= $second_server_h3->next_transaction;
-        return defined $early_server_tx;
     }),
     'accepted 0-RTT request becomes application-visible after the handshake',
 );
