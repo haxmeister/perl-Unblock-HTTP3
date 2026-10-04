@@ -1256,6 +1256,7 @@ unblock_http3_end_headers_cb(
 
     event = unblock_http3_event_new("headers", stream_id);
     av_push(event, unblock_http3_bless_header_block(block));
+    av_push(event, newSVuv((UV)block->field_section_size));
     av_push(event, newSViv(fin ? 1 : 0));
     unblock_http3_push_event(native, event);
 
