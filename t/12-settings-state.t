@@ -45,14 +45,39 @@ is(
         $remembered,
         {
             %$remembered,
-            1 => '8192',
             6 => '131072',
             7 => '200',
         },
     ),
     undef,
-    'larger core limits remain compatible with remembered 0-RTT settings',
+    'larger generic core limits remain compatible with remembered 0-RTT settings',
 );
+
+like(
+    Unblock::HTTP3::Connection::_settings_compatibility_error(
+        $remembered,
+        {
+            %$remembered,
+            1 => '8192',
+        },
+    ),
+    qr/QPACK_MAX_TABLE_CAPACITY changed/,
+    'remembered nonzero QPACK table capacity must remain exactly the same',
+);
+
+my ($qpack_error_code, $qpack_error) =
+    Unblock::HTTP3::Connection::_settings_compatibility_error(
+        $remembered,
+        {
+            %$remembered,
+            1 => '8192',
+        },
+    );
+
+is($qpack_error_code, 0x0202,
+    'QPACK 0-RTT capacity mismatch uses QPACK_DECODER_STREAM_ERROR');
+like($qpack_error, qr/QPACK_MAX_TABLE_CAPACITY changed/,
+    'QPACK mismatch reports the incompatible remembered setting');
 
 like(
     Unblock::HTTP3::Connection::_settings_compatibility_error(
@@ -87,7 +112,17 @@ like(
         },
     ),
     qr/extension setting 84 changed/,
-    'generic extension settings require exact compatibility',
+    'remembered generic extension settings require exact compatibility',
+);
+
+my %with_new_extension = (%$remembered, 116 => '9');
+is(
+    Unblock::HTTP3::Connection::_settings_compatibility_error(
+        $remembered,
+        \%with_new_extension,
+    ),
+    undef,
+    'new extension settings that were not used by 0-RTT may be added',
 );
 
 my $endpoint = Net::QUIC::Endpoint->client(

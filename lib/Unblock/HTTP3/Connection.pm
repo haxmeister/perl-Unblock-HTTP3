@@ -19,6 +19,7 @@ our $VERSION = '0.01';
 my $H3_DATAGRAM_ERROR = 0x33;
 my $H3_EXCESSIVE_LOAD = 0x0107;
 my $H3_SETTINGS_ERROR = 0x0109;
+my $QPACK_DECODER_STREAM_ERROR = 0x0202;
 my $H3_REQUEST_CANCELLED = 0x010c;
 my $H3_MESSAGE_ERROR = 0x010e;
 my $HTTP3_MAX_VARINT = '4611686018427387903';
@@ -300,16 +301,36 @@ sub _effective_setting {
 sub _settings_compatibility_error {
     my ($remembered, $current) = @_;
 
-    for my $id (qw(1 6 7 8 51)) {
+    my $old_qpack_capacity = _effective_setting($remembered, 1);
+    my $new_qpack_capacity = _effective_setting($current, 1);
+
+    if ($old_qpack_capacity ne '0') {
+        if (
+            !exists($current->{1})
+            || $new_qpack_capacity ne $old_qpack_capacity
+        ) {
+            my $message =
+                "SETTINGS_QPACK_MAX_TABLE_CAPACITY changed from "
+                . "$old_qpack_capacity to $new_qpack_capacity";
+
+            return wantarray
+                ? ($QPACK_DECODER_STREAM_ERROR, $message)
+                : $message;
+        }
+    }
+
+    for my $id (qw(6 7 8 51)) {
         my $old = _effective_setting($remembered, $id);
         my $new = _effective_setting($current, $id);
 
-        if ($id == 6) {
-            return "SETTINGS_MAX_FIELD_SECTION_SIZE decreased from $old to $new"
-                if _decimal_less_than($new, $old);
-        } else {
-            return "HTTP/3 setting $id decreased from $old to $new"
-                if _decimal_less_than($new, $old);
+        if (_decimal_less_than($new, $old)) {
+            my $message = $id == 6
+                ? "SETTINGS_MAX_FIELD_SECTION_SIZE decreased from $old to $new"
+                : "HTTP/3 setting $id decreased from $old to $new";
+
+            return wantarray
+                ? ($H3_SETTINGS_ERROR, $message)
+                : $message;
         }
 
         if (
@@ -317,23 +338,33 @@ sub _settings_compatibility_error {
             && $remembered->{$id} ne $SETTING_DEFAULT{$id}
             && !exists($current->{$id})
         ) {
-            return "HTTP/3 setting $id was previously non-default but is now omitted";
+            my $message =
+                "HTTP/3 setting $id was previously non-default but is now omitted";
+
+            return wantarray
+                ? ($H3_SETTINGS_ERROR, $message)
+                : $message;
         }
     }
 
-    my %ids = map { $_ => 1 } (
-        grep { _is_peer_extension_setting_id($_) } keys %$remembered,
-        grep { _is_peer_extension_setting_id($_) } keys %$current,
-    );
+    for my $id (
+        grep {
+            _is_peer_extension_setting_id($_)
+        } keys %$remembered
+    ) {
+        if (
+            !exists($current->{$id})
+            || $remembered->{$id} ne $current->{$id}
+        ) {
+            my $message = "extension setting $id changed across 0-RTT";
 
-    for my $id (keys %ids) {
-        return "extension setting $id changed across 0-RTT"
-            if !exists($remembered->{$id})
-                || !exists($current->{$id})
-                || $remembered->{$id} ne $current->{$id};
+            return wantarray
+                ? ($H3_SETTINGS_ERROR, $message)
+                : $message;
+        }
     }
 
-    return;
+    return wantarray ? () : undef;
 }
 
 sub _normalize_extension_settings {
@@ -590,14 +621,15 @@ sub _accept_peer_extension_settings {
         defined($self->{remembered_peer_settings})
         && $self->{quic}->early_data_status eq 'accepted'
     ) {
-        my $compatibility_error = _settings_compatibility_error(
-            $self->{remembered_peer_settings},
-            $all_settings,
-        );
+        my ($compatibility_code, $compatibility_error) =
+            _settings_compatibility_error(
+                $self->{remembered_peer_settings},
+                $all_settings,
+            );
 
         if (defined $compatibility_error) {
             $self->_fail_connection(
-                $H3_SETTINGS_ERROR,
+                $compatibility_code,
                 "peer SETTINGS are incompatible with accepted 0-RTT: "
                     . $compatibility_error,
             );
