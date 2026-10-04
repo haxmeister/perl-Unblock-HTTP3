@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "xt/benchmark-loopback.pl"
+      - "xt/benchmark-process-loopback.pl"
       - "xt/BENCHMARKS.md"
       - ".github/workflows/benchmark.yml"
 
@@ -45,9 +46,22 @@ jobs:
           perl -Iblib/lib -Iblib/arch xt/benchmark-loopback.pl 2>&1 \
             | tee "$RUNNER_TEMP/http3-benchmark.txt"
 
+      - name: Run split-process loopback benchmark
+        env:
+          UNBLOCK_HTTP3_BENCH_REQUESTS: "2000"
+          UNBLOCK_HTTP3_BENCH_WARMUP: "200"
+          UNBLOCK_HTTP3_BENCH_BODY_BYTES: "1024"
+          UNBLOCK_HTTP3_BENCH_CONCURRENCY: "1,8,16,32,64,96"
+        run: |
+          set -o pipefail
+          perl -Iblib/lib -Iblib/arch xt/benchmark-process-loopback.pl 2>&1 \
+            | tee "$RUNNER_TEMP/http3-process-benchmark.txt"
+
       - name: Store benchmark output
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: http3-loopback-benchmark
-          path: ${{ runner.temp }}/http3-benchmark.txt
+          path: |
+            ${{ runner.temp }}/http3-benchmark.txt
+            ${{ runner.temp }}/http3-process-benchmark.txt
