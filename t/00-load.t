@@ -32,7 +32,7 @@ my @versioned_modules = (
 );
 
 for my $module (@versioned_modules) {
-    is($module->[1], '0.01', "$module->[0] version matches distribution");
+    is($module->[1], '0.02', "$module->[0] version matches distribution");
 }
 
 done_testing;
