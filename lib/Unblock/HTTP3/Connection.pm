@@ -3433,13 +3433,13 @@ sub _drain_events {
         }
 
         if ($type eq 'reset_stream') {
+            my $transaction = $self->{transactions}{$id};
+            $transaction->_mark_local_reset($args[0])
+                if defined $transaction;
+
             my $stream = $self->{streams}{$id};
-            if (defined($stream) && $stream->can_send) {
-                $stream->reset($args[0]);
-                my $transaction = $self->{transactions}{$id};
-                $transaction->_mark_local_reset($args[0])
-                    if defined $transaction;
-            }
+            $stream->reset($args[0])
+                if defined($stream) && $stream->can_send;
             next;
         }
 
