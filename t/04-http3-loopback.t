@@ -22,13 +22,18 @@ my $tls_dir = tempdir(CLEANUP => 1);
 my $cert_file = "$tls_dir/server-cert.pem";
 my $key_file = "$tls_dir/server-key.pem";
 
-system(
-    'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
-    '-keyout', $key_file,
-    '-out', $cert_file,
-    '-subj', '/CN=localhost',
-    '-days', '1',
-) == 0 or die "could not generate loopback TLS test certificate with openssl";
+{
+    local $ENV{OPENSSL_CONF};
+    delete $ENV{OPENSSL_CONF};
+
+    system(
+        'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+        '-keyout', $key_file,
+        '-out', $cert_file,
+        '-subj', '/CN=localhost',
+        '-days', '1',
+    ) == 0 or die "could not generate loopback TLS test certificate with openssl";
+}
 
 sub make_udp_socket {
     my $socket = IO::Socket::INET->new(
