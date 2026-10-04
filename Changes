@@ -17,6 +17,14 @@ Revision history for Unblock-HTTP3
     - Retain outgoing body chunks as dedicated Perl scalar storage in native
       state instead of allocating and copying a second C byte buffer, while
       preserving caller-mutation isolation and ACK-driven release.
+    - Add incoming-body microbenchmarks for native DATA events, buffered
+      accumulation, streaming delivery, and complete buffered construction.
+    - Retain owned incoming DATA scalars directly in streaming Body::Reader,
+      removing a second Perl string copy while preserving receive-credit and
+      backpressure semantics.
+    - Keep small buffered DATA chunks on the compact scalar path and retain
+      owned chunks of 16 KiB or larger until one final message-body coalescing,
+      reducing repeated large-body copies.
 
 0.01  2026-10-04
     - Start Unblock::HTTP3.
