@@ -3206,6 +3206,12 @@ sub _service_stream {
         $self->{native}->shutdown_stream_write($id);
         $self->{native}->discard_body($id);
 
+        # nghttp3 may queue RESET_STREAM in response to peer STOP_SENDING.
+        # Drain it while the Transaction is still associated with this stream
+        # so the exact local reset code is recorded before terminal cleanup.
+        $self->_drain_events;
+        return if $self->{failed};
+
         my $transaction = $self->{transactions}{$id};
         if (defined $transaction) {
             $transaction->_mark_remote_stop_sending($remote_stop);
