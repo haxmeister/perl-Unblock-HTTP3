@@ -3515,10 +3515,10 @@ sub _drain_events {
         }
 
         if ($type eq 'headers') {
-            my ($block, $fin) = @args;
+            my ($block, $field_section_size, $fin) = @args;
 
             if (
-                $block->field_section_size
+                $field_section_size
                 > $self->{max_field_section_size}
             ) {
                 $self->_fail_connection(
