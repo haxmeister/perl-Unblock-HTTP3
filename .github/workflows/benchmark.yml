@@ -41,10 +41,12 @@ jobs:
           UNBLOCK_HTTP3_BENCH_BODY_BYTES: "1024"
           UNBLOCK_HTTP3_BENCH_CONCURRENCY: "1,16,64"
         run: |
-          perl -Iblib/lib -Iblib/arch xt/benchmark-loopback.pl \
+          set -o pipefail
+          perl -Iblib/lib -Iblib/arch xt/benchmark-loopback.pl 2>&1 \
             | tee "$RUNNER_TEMP/http3-benchmark.txt"
 
       - name: Store benchmark output
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: http3-loopback-benchmark
