@@ -5,7 +5,7 @@ use warnings;
 
 use XSLoader ();
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -52,6 +52,17 @@ The main public objects are L<Unblock::HTTP3::Connection> and
 L<Unblock::HTTP3::Transaction>. Streaming bodies, Capsules, HTTP Datagrams,
 Extended CONNECT, extension SETTINGS, extension streams, priorities, graceful
 shutdown, and replay-aware 0-RTT are built around those objects.
+
+=head1 STANDARDS
+
+Unblock::HTTP3 implements the HTTP/3 protocol defined by RFC 9114 with QPACK
+from RFC 9204. It also supports RFC 9218 priorities, RFC 9220 Extended CONNECT,
+RFC 9297 HTTP Datagrams and Capsules, and RFC 9412 ORIGIN.
+
+QUIC transport behavior remains the responsibility of L<Net::QUIC>.
+
+Detailed conformance notes and native-library limitations are recorded in
+C<docs/RFC-COMPLIANCE.md> in the distribution.
 
 =head1 MODULES
 
