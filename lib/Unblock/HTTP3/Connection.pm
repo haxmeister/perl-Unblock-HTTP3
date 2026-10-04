@@ -19,6 +19,7 @@ our $VERSION = '0.01';
 my $H3_DATAGRAM_ERROR = 0x33;
 my $H3_CLOSED_CRITICAL_STREAM = 0x0104;
 my $H3_EXCESSIVE_LOAD = 0x0107;
+my $H3_ID_ERROR = 0x0108;
 my $H3_SETTINGS_ERROR = 0x0109;
 my $QPACK_DECODER_STREAM_ERROR = 0x0202;
 my $H3_REQUEST_CANCELLED = 0x010c;
@@ -2943,6 +2944,20 @@ sub _classify_peer_uni_stream {
             _decode_http3_varint($state->{buffer}, 0);
 
         if (defined $type) {
+            if ($self->{role} eq 'client' && $type eq '1') {
+                $stream->consume(length($state->{buffer}))
+                    if length($state->{buffer});
+
+                delete $self->{peer_uni_probe}{$id};
+
+                $self->_fail_connection(
+                    $H3_ID_ERROR,
+                    'peer opened a push stream without advertised push capacity',
+                );
+
+                return 'failed';
+            }
+
             if ($CORE_STREAM_TYPE{$type}) {
                 my $bytes = $state->{buffer};
                 my $fin = $state->{fin};
