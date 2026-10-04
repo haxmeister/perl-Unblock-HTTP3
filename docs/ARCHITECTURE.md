@@ -82,6 +82,15 @@ Uniform owns:
 - header and trailer fidelity
 - section mutability and whole-message completeness
 
+Uniform::HTTP 0.06 also supplies the header-only native FastPath used by
+Unblock::HTTP3's XS layer. Outgoing canonical messages are inspected directly
+in XS. On receive, decoded nghttp3 header blocks stay in native connection
+state until Unblock::HTTP3 has applied HTTP/3 semantic checks, then XS builds
+the exact canonical Uniform object directly from validated native byte spans.
+
+The native path does not create a second HTTP object model. Uniform still owns
+the final Perl Request and Response objects and their normal lifecycle.
+
 Unblock::HTTP3 adds only protocol-engine concerns. HTTP/3 priority, reset,
 STOP_SENDING, completion, body-stream, Datagram, and Capsule state belongs to
 `Unblock::HTTP3::Transaction`, not to the canonical Uniform message objects.
