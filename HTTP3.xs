@@ -577,6 +577,122 @@ unblock_http3_received_uniform_flags(
     return flags;
 }
 
+
+static SV *
+unblock_http3_header_block_uniform_request(
+    pTHX_ unblock_http3_header_block *block,
+    SV *method,
+    SV *target,
+    SV *scheme,
+    SV *authority,
+    SV *protocol,
+    int fin
+)
+{
+    dMY_CXT;
+    uhttp_native_input input;
+    uhttp_native_field *fields = NULL;
+    Size_t field_count = 0;
+    uint8_t *cookie = NULL;
+    SV *object;
+
+    unblock_http3_header_block_uniform_fields(
+        aTHX_ block,
+        &fields,
+        &field_count,
+        &cookie
+    );
+
+    uhttp_native_input_init(
+        &input,
+        UHTTP_KIND_REQUEST
+    );
+    input.flags = unblock_http3_received_uniform_flags(
+        UHTTP_KIND_REQUEST,
+        fin
+    );
+    input.version.data = "3";
+    input.version.len = 1;
+    input.method =
+        unblock_http3_uniform_bytes_from_sv(method);
+    input.target =
+        unblock_http3_uniform_bytes_from_sv(target);
+    input.scheme =
+        unblock_http3_uniform_bytes_from_sv(scheme);
+    input.authority =
+        unblock_http3_uniform_bytes_from_sv(authority);
+    input.protocol =
+        unblock_http3_uniform_bytes_from_sv(protocol);
+    input.headers = fields;
+    input.header_count = field_count;
+
+    object = uhttp_native_from_validated(
+        aTHX_ &MY_CXT.uniform_api,
+        &input,
+        UHTTP_NATIVE_TRUSTED
+    );
+
+    if (cookie != NULL) {
+        Safefree(cookie);
+    }
+    if (fields != NULL) {
+        Safefree(fields);
+    }
+
+    return object;
+}
+
+static SV *
+unblock_http3_header_block_uniform_response(
+    pTHX_ unblock_http3_header_block *block,
+    IV status,
+    int fin
+)
+{
+    dMY_CXT;
+    uhttp_native_input input;
+    uhttp_native_field *fields = NULL;
+    Size_t field_count = 0;
+    uint8_t *cookie = NULL;
+    SV *object;
+
+    unblock_http3_header_block_uniform_fields(
+        aTHX_ block,
+        &fields,
+        &field_count,
+        &cookie
+    );
+
+    uhttp_native_input_init(
+        &input,
+        UHTTP_KIND_RESPONSE
+    );
+    input.flags = unblock_http3_received_uniform_flags(
+        UHTTP_KIND_RESPONSE,
+        fin
+    );
+    input.version.data = "3";
+    input.version.len = 1;
+    input.status = status;
+    input.headers = fields;
+    input.header_count = field_count;
+
+    object = uhttp_native_from_validated(
+        aTHX_ &MY_CXT.uniform_api,
+        &input,
+        UHTTP_NATIVE_TRUSTED
+    );
+
+    if (cookie != NULL) {
+        Safefree(cookie);
+    }
+    if (fields != NULL) {
+        Safefree(fields);
+    }
+
+    return object;
+}
+
 static void
 unblock_http3_fail(const char *operation, int rv)
 {
@@ -2342,6 +2458,196 @@ _new_server(max_field_section_size, qpack_max_table_capacity, qpack_blocked_stre
     OUTPUT:
         RETVAL
 
+MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native::HeaderBlock
+
+UV
+field_section_size(self)
+    SV *self
+    PREINIT:
+        unblock_http3_header_block *block;
+    CODE:
+        block = unblock_http3_header_block_from_sv(self);
+        RETVAL = (UV)block->field_section_size;
+    OUTPUT:
+        RETVAL
+
+SV *
+pseudo(self, name)
+    SV *self
+    SV *name
+    PREINIT:
+        unblock_http3_header_block *block;
+        STRLEN namelen;
+        const char *name_bytes;
+        const unblock_http3_captured_field *field;
+    CODE:
+        block = unblock_http3_header_block_from_sv(self);
+        name_bytes = SvPVbyte(name, namelen);
+        field = unblock_http3_header_block_pseudo(
+            block,
+            name_bytes,
+            (size_t)namelen
+        );
+
+        if (field == NULL) {
+            XSRETURN_UNDEF;
+        }
+
+        RETVAL = newSVpvn(
+            (const char *)field->value,
+            (STRLEN)field->valuelen
+        );
+    OUTPUT:
+        RETVAL
+
+SV *
+header_values(self, name)
+    SV *self
+    SV *name
+    PREINIT:
+        unblock_http3_header_block *block;
+        STRLEN namelen;
+        const char *name_bytes;
+        AV *values;
+        size_t i;
+    CODE:
+        block = unblock_http3_header_block_from_sv(self);
+        name_bytes = SvPVbyte(name, namelen);
+        values = newAV();
+
+        for (i = 0; i < block->count; ++i) {
+            const unblock_http3_captured_field *field =
+                &block->fields[i];
+
+            if (
+                field->namelen != 0
+                && field->name[0] == ':'
+            ) {
+                continue;
+            }
+
+            if (
+                unblock_http3_captured_name_equal_ci(
+                    field,
+                    name_bytes,
+                    (size_t)namelen
+                )
+            ) {
+                av_push(
+                    values,
+                    newSVpvn(
+                        (const char *)field->value,
+                        (STRLEN)field->valuelen
+                    )
+                );
+            }
+        }
+
+        RETVAL = newRV_noinc((SV *)values);
+    OUTPUT:
+        RETVAL
+
+int
+has_header(self, name)
+    SV *self
+    SV *name
+    PREINIT:
+        unblock_http3_header_block *block;
+        STRLEN namelen;
+        const char *name_bytes;
+        size_t i;
+    CODE:
+        block = unblock_http3_header_block_from_sv(self);
+        name_bytes = SvPVbyte(name, namelen);
+        RETVAL = 0;
+
+        for (i = 0; i < block->count; ++i) {
+            const unblock_http3_captured_field *field =
+                &block->fields[i];
+
+            if (
+                field->namelen != 0
+                && field->name[0] == ':'
+            ) {
+                continue;
+            }
+
+            if (
+                unblock_http3_captured_name_equal_ci(
+                    field,
+                    name_bytes,
+                    (size_t)namelen
+                )
+            ) {
+                RETVAL = 1;
+                break;
+            }
+        }
+    OUTPUT:
+        RETVAL
+
+SV *
+uniform_request(self, method, target, scheme, authority, protocol, fin)
+    SV *self
+    SV *method
+    SV *target
+    SV *scheme
+    SV *authority
+    SV *protocol
+    IV fin
+    PREINIT:
+        unblock_http3_header_block *block;
+    CODE:
+        block = unblock_http3_header_block_from_sv(self);
+        RETVAL = unblock_http3_header_block_uniform_request(
+            aTHX_ block,
+            method,
+            target,
+            scheme,
+            authority,
+            protocol,
+            fin ? 1 : 0
+        );
+    OUTPUT:
+        RETVAL
+
+SV *
+uniform_response(self, status, fin)
+    SV *self
+    IV status
+    IV fin
+    PREINIT:
+        unblock_http3_header_block *block;
+    CODE:
+        block = unblock_http3_header_block_from_sv(self);
+        RETVAL = unblock_http3_header_block_uniform_response(
+            aTHX_ block,
+            status,
+            fin ? 1 : 0
+        );
+    OUTPUT:
+        RETVAL
+
+void
+DESTROY(self)
+    SV *self
+    PREINIT:
+        unblock_http3_header_block *block;
+    CODE:
+        if (!SvROK(self)) {
+            XSRETURN_EMPTY;
+        }
+
+        block = INT2PTR(
+            unblock_http3_header_block *,
+            SvIV(SvRV(self))
+        );
+
+        if (block != NULL) {
+            unblock_http3_header_block_free(block);
+            sv_setiv(SvRV(self), 0);
+        }
+
 MODULE = Unblock::HTTP3    PACKAGE = Unblock::HTTP3::_Native::Connection
 
 const char *
@@ -3414,6 +3720,7 @@ DESTROY(self)
             }
 
             unblock_http3_body_free_all(native);
+            unblock_http3_header_block_free_all(native);
             Safefree(native);
             sv_setiv(SvRV(self), 0);
         }
