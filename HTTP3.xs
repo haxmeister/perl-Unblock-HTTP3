@@ -1050,17 +1050,17 @@ unblock_http3_validate_uniform_field(
     size_t end;
 
     if (
-        unblock_http3_bytes_equal(name, namelen, "connection")
-        || unblock_http3_bytes_equal(name, namelen, "keep-alive")
-        || unblock_http3_bytes_equal(name, namelen, "proxy-connection")
-        || unblock_http3_bytes_equal(name, namelen, "transfer-encoding")
-        || unblock_http3_bytes_equal(name, namelen, "upgrade")
+        unblock_http3_ascii_equal_ci(name, namelen, "connection")
+        || unblock_http3_ascii_equal_ci(name, namelen, "keep-alive")
+        || unblock_http3_ascii_equal_ci(name, namelen, "proxy-connection")
+        || unblock_http3_ascii_equal_ci(name, namelen, "transfer-encoding")
+        || unblock_http3_ascii_equal_ci(name, namelen, "upgrade")
     ) {
         croak("HTTP/3 does not allow connection-specific field '%.*s'",
             (int)namelen, (const char *)name);
     }
 
-    if (unblock_http3_bytes_equal(name, namelen, "te")) {
+    if (unblock_http3_ascii_equal_ci(name, namelen, "te")) {
         if (context != 0) {
             croak("HTTP/3 TE is only allowed in request headers");
         }
@@ -1094,13 +1094,55 @@ unblock_http3_validate_uniform_field(
     }
 
     if (context == 2) {
-        if (unblock_http3_bytes_equal(name, namelen, "content-length")) {
+        if (unblock_http3_ascii_equal_ci(name, namelen, "content-length")) {
             croak("HTTP/3 Content-Length is not allowed in trailers");
         }
 
-        if (unblock_http3_bytes_equal(name, namelen, "host")) {
+        if (unblock_http3_ascii_equal_ci(name, namelen, "host")) {
             croak("HTTP/3 Host is not allowed in trailers");
         }
+    }
+}
+
+
+static void
+unblock_http3_uniform_validate_section(
+    pTHX_ const uhttp_native_section *section,
+    int context
+)
+{
+    Size_t i;
+    Size_t count = uhttp_native_field_count(aTHX_ section);
+
+    for (i = 0; i < count; ++i) {
+        SV *name_sv;
+        SV *value_sv;
+        STRLEN namelen;
+        STRLEN valuelen;
+        const char *name;
+        const char *value;
+
+        if (
+            !uhttp_native_field_at(
+                aTHX_ section,
+                i,
+                &name_sv,
+                &value_sv
+            )
+        ) {
+            croak("Uniform field inspection failed");
+        }
+
+        name = SvPVbyte(name_sv, namelen);
+        value = SvPVbyte(value_sv, valuelen);
+
+        unblock_http3_validate_uniform_field(
+            context,
+            (const uint8_t *)name,
+            (size_t)namelen,
+            (const uint8_t *)value,
+            (size_t)valuelen
+        );
     }
 }
 
@@ -2163,6 +2205,362 @@ close_stream(self, stream_id, rx_error = &PL_sv_undef, tx_error = &PL_sv_undef)
             native,
             (int64_t)stream_id
         );
+
+
+UV
+uniform_request_field_section_size(self, message)
+    SV *self
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        size_t size;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        (void)native;
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_REQUEST,
+            &view
+        );
+        unblock_http3_uniform_validate_section(
+            aTHX_ &view.headers,
+            0
+        );
+        size = unblock_http3_uniform_request_size(
+            aTHX_ &view
+        );
+        RETVAL = (UV)size;
+    OUTPUT:
+        RETVAL
+
+UV
+uniform_response_field_section_size(self, message)
+    SV *self
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        size_t size;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        (void)native;
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_RESPONSE,
+            &view
+        );
+        unblock_http3_uniform_validate_section(
+            aTHX_ &view.headers,
+            1
+        );
+        size = unblock_http3_uniform_response_size(
+            aTHX_ &view
+        );
+        RETVAL = (UV)size;
+    OUTPUT:
+        RETVAL
+
+UV
+uniform_trailer_field_section_size(self, message)
+    SV *self
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        size_t size;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        (void)native;
+
+        if (
+            !uhttp_native_inspect(
+                aTHX_ &MY_CXT.uniform_api,
+                message,
+                &view
+            )
+        ) {
+            croak("native Uniform fast path requires an exact canonical message");
+        }
+
+        unblock_http3_uniform_validate_section(
+            aTHX_ &view.trailers,
+            2
+        );
+        size = unblock_http3_uniform_section_size(
+            aTHX_ &view.trailers
+        );
+        RETVAL = (UV)size;
+    OUTPUT:
+        RETVAL
+
+void
+submit_uniform_request(self, stream_id, message, streaming = 0)
+    SV *self
+    IV stream_id
+    SV *message
+    IV streaming
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        unblock_http3_uniform_fields headers;
+        unblock_http3_uniform_fields trailers;
+        unblock_http3_body *body_ctx;
+        const nghttp3_data_reader *reader;
+        Size_t trailer_count;
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_REQUEST,
+            &view
+        );
+        unblock_http3_uniform_request_fields(
+            aTHX_ &view,
+            &headers
+        );
+        unblock_http3_uniform_trailer_fields(
+            aTHX_ &view,
+            &trailers
+        );
+        trailer_count = uhttp_native_field_count(
+            aTHX_ &view.trailers
+        );
+        body_ctx = NULL;
+        reader = NULL;
+
+        if (
+            (view.flags & UHTTP_HAS_BUFFERED_BODY)
+            || streaming
+            || trailer_count != 0
+        ) {
+            body_ctx = unblock_http3_body_create(
+                native,
+                (int64_t)stream_id,
+                streaming ? 1 : 0
+            );
+
+            if (view.flags & UHTTP_HAS_BUFFERED_BODY) {
+                unblock_http3_body_append(
+                    native,
+                    body_ctx,
+                    view.body
+                );
+            }
+
+            if (!streaming) {
+                body_ctx->eof = 1;
+            }
+
+            reader = &unblock_http3_body_reader;
+        }
+
+        rv = nghttp3_conn_submit_request(
+            native->conn,
+            (int64_t)stream_id,
+            headers.nva,
+            headers.nvlen,
+            reader,
+            body_ctx
+        );
+
+        unblock_http3_uniform_fields_free(&headers);
+
+        if (rv != 0) {
+            unblock_http3_uniform_fields_free(&trailers);
+            if (body_ctx != NULL) {
+                unblock_http3_body_remove(
+                    native,
+                    (int64_t)stream_id
+                );
+            }
+            unblock_http3_fail("could not submit HTTP/3 request", rv);
+        }
+
+        if (trailers.nvlen != 0) {
+            rv = nghttp3_conn_submit_trailers(
+                native->conn,
+                (int64_t)stream_id,
+                trailers.nva,
+                trailers.nvlen
+            );
+
+            unblock_http3_uniform_fields_free(&trailers);
+
+            if (rv != 0) {
+                unblock_http3_fail(
+                    "could not submit HTTP/3 request trailers",
+                    rv
+                );
+            }
+        } else {
+            unblock_http3_uniform_fields_free(&trailers);
+        }
+
+void
+submit_uniform_info(self, stream_id, message)
+    SV *self
+    IV stream_id
+    SV *message
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        unblock_http3_uniform_fields fields;
+        char status_buffer[4];
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_RESPONSE,
+            &view
+        );
+        unblock_http3_uniform_response_fields(
+            aTHX_ &view,
+            &fields,
+            status_buffer
+        );
+
+        rv = nghttp3_conn_submit_info(
+            native->conn,
+            (int64_t)stream_id,
+            fields.nva,
+            fields.nvlen
+        );
+
+        unblock_http3_uniform_fields_free(&fields);
+
+        if (rv != 0) {
+            unblock_http3_fail(
+                "could not submit HTTP/3 informational response",
+                rv
+            );
+        }
+
+void
+submit_uniform_response(self, stream_id, message, streaming = 0)
+    SV *self
+    IV stream_id
+    SV *message
+    IV streaming
+    PREINIT:
+        unblock_http3_native_conn *native;
+        uhttp_native_view view;
+        unblock_http3_uniform_fields headers;
+        unblock_http3_uniform_fields trailers;
+        unblock_http3_body *body_ctx;
+        const nghttp3_data_reader *reader;
+        Size_t trailer_count;
+        char status_buffer[4];
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        unblock_http3_uniform_view(
+            aTHX_ message,
+            UHTTP_KIND_RESPONSE,
+            &view
+        );
+        unblock_http3_uniform_response_fields(
+            aTHX_ &view,
+            &headers,
+            status_buffer
+        );
+        unblock_http3_uniform_trailer_fields(
+            aTHX_ &view,
+            &trailers
+        );
+        trailer_count = uhttp_native_field_count(
+            aTHX_ &view.trailers
+        );
+        body_ctx = NULL;
+        reader = NULL;
+
+        if (
+            (view.flags & UHTTP_HAS_BUFFERED_BODY)
+            || streaming
+            || trailer_count != 0
+        ) {
+            body_ctx = unblock_http3_body_create(
+                native,
+                (int64_t)stream_id,
+                streaming ? 1 : 0
+            );
+
+            if (view.flags & UHTTP_HAS_BUFFERED_BODY) {
+                unblock_http3_body_append(
+                    native,
+                    body_ctx,
+                    view.body
+                );
+            }
+
+            if (!streaming) {
+                body_ctx->eof = 1;
+            }
+
+            reader = &unblock_http3_body_reader;
+
+            rv = nghttp3_conn_set_stream_user_data(
+                native->conn,
+                (int64_t)stream_id,
+                body_ctx
+            );
+
+            if (rv != 0) {
+                unblock_http3_uniform_fields_free(&headers);
+                unblock_http3_uniform_fields_free(&trailers);
+                unblock_http3_body_remove(
+                    native,
+                    (int64_t)stream_id
+                );
+                unblock_http3_fail(
+                    "could not attach HTTP/3 response body",
+                    rv
+                );
+            }
+        }
+
+        rv = nghttp3_conn_submit_response(
+            native->conn,
+            (int64_t)stream_id,
+            headers.nva,
+            headers.nvlen,
+            reader
+        );
+
+        unblock_http3_uniform_fields_free(&headers);
+
+        if (rv != 0) {
+            unblock_http3_uniform_fields_free(&trailers);
+            if (body_ctx != NULL) {
+                unblock_http3_body_remove(
+                    native,
+                    (int64_t)stream_id
+                );
+            }
+            unblock_http3_fail("could not submit HTTP/3 response", rv);
+        }
+
+        if (trailers.nvlen != 0) {
+            rv = nghttp3_conn_submit_trailers(
+                native->conn,
+                (int64_t)stream_id,
+                trailers.nva,
+                trailers.nvlen
+            );
+
+            unblock_http3_uniform_fields_free(&trailers);
+
+            if (rv != 0) {
+                unblock_http3_fail(
+                    "could not submit HTTP/3 response trailers",
+                    rv
+                );
+            }
+        } else {
+            unblock_http3_uniform_fields_free(&trailers);
+        }
 
 void
 submit_request(self, stream_id, fields, body = &PL_sv_undef, streaming = 0)
