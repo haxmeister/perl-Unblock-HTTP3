@@ -56,9 +56,11 @@ sub _new {
         request_streaming         => $request_streaming,
         early_data                => $early_data,
         response_streaming        => 0,
-        request_buffered_body     => '',
+        request_buffered_body     => [],
+        request_buffered_bytes    => 0,
         request_buffered_seen     => 0,
-        response_buffered_body    => '',
+        response_buffered_body    => [],
+        response_buffered_bytes   => 0,
         response_buffered_seen    => 0,
         response_output_started  => 0,
         capsule_stream           => undef,
@@ -666,7 +668,7 @@ sub _buffered_body_bytes {
         if $kind ne 'request' && $kind ne 'response';
 
     return $self->{ $kind . '_buffered_seen' }
-        ? length($self->{ $kind . '_buffered_body' })
+        ? $self->{ $kind . '_buffered_bytes' }
         : 0;
 }
 
@@ -676,7 +678,12 @@ sub _append_buffered_body {
         if $kind ne 'request' && $kind ne 'response';
 
     $self->{ $kind . '_buffered_seen' } = 1;
-    $self->{ $kind . '_buffered_body' } .= $bytes;
+
+    if (length $bytes) {
+        push @{ $self->{ $kind . '_buffered_body' } }, $bytes;
+        $self->{ $kind . '_buffered_bytes' } += length($bytes);
+    }
+
     return;
 }
 
@@ -695,11 +702,21 @@ sub _finish_received_message {
         $self->{ $kind . '_receive_mode' } eq 'buffered'
         && $self->{ $kind . '_buffered_seen' }
     ) {
-        $message->body($self->{ $kind . '_buffered_body' });
-    }
+        my $chunks = $self->{ $kind . '_buffered_body' };
+        my $body = @$chunks == 1
+            ? $chunks->[0]
+            : join('', @$chunks);
 
-    $self->{ $kind . '_buffered_body' } = '';
-    $self->{ $kind . '_buffered_seen' } = 0;
+        $self->{ $kind . '_buffered_body' } = [];
+        $self->{ $kind . '_buffered_bytes' } = 0;
+        $self->{ $kind . '_buffered_seen' } = 0;
+
+        $message->body($body);
+    } else {
+        $self->{ $kind . '_buffered_body' } = [];
+        $self->{ $kind . '_buffered_bytes' } = 0;
+        $self->{ $kind . '_buffered_seen' } = 0;
+    }
 
     $message->freeze_trailers;
     $message->freeze;
@@ -711,7 +728,8 @@ sub _discard_received_body_buffers {
     my ($self) = @_;
 
     for my $kind (qw(request response)) {
-        $self->{ $kind . '_buffered_body' } = '';
+        $self->{ $kind . '_buffered_body' } = [];
+        $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
     }
 
