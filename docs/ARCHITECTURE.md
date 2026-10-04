@@ -55,7 +55,7 @@ ngtcp2 and TLS remain below Net::QUIC.
 
 ## HTTP message objects
 
-Uniform::HTTP 0.05 is the runtime HTTP message layer.
+Uniform::HTTP 0.06 is the runtime HTTP message layer.
 
 Unblock::HTTP3 uses exact canonical `Uniform::HTTP::Request` and
 `Uniform::HTTP::Response` objects directly. HTTP/3-specific lifecycle and
@@ -422,7 +422,7 @@ values when the caller uses type-dispatch handlers.
 
 Request and response trailers are supported.
 
-They are stored separately from normal headers by Uniform::HTTP 0.05.
+They are stored separately from normal headers by Uniform::HTTP 0.06.
 Incoming initial fields are frozen when their HEADERS section completes while
 trailers remain independently writable until the trailing section ends.
 
@@ -520,7 +520,7 @@ The current baseline is:
 
 - Alien::nghttp3 0.01
 - Net::QUIC 0.04
-- Uniform::HTTP 0.05 as the runtime HTTP message layer
+- Uniform::HTTP 0.06 as the runtime HTTP message layer
 
 Unblock::HTTP3 integration tests do not install Net::QUIC from GitHub.
 
