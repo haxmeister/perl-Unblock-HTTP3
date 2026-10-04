@@ -210,6 +210,13 @@ Linux::Event::HTTP:
 A false return means the bytes were accepted but production should pause until
 `on_drain` runs.
 
+Outgoing body chunks are retained in native state as dedicated Perl scalars.
+The native chunk owns that scalar until the corresponding bytes are
+acknowledged or discarded, and libnghttp3 reads directly from its stable byte
+storage. This avoids allocating and copying a second C buffer for every body
+chunk. The retained scalar is separate from the caller's scalar, so later
+caller mutation cannot change bytes already accepted by Body::Stream.
+
 Incremental incoming bodies are supported through Unblock::HTTP3::Body::Reader.
 
 A reader can be used with callbacks or pulled with `next_chunk`. DATA is not
