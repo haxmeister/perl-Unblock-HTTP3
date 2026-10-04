@@ -1468,6 +1468,18 @@ sub request {
     croak 'request(): unknown options: ' . join(', ', sort keys %option)
         if %option;
 
+    $self->_assert_request_semantics(
+        $request,
+        'request()',
+    );
+    my $request_streaming = defined($stream_body) ? 1 : 0;
+
+    $self->_assert_request_content_length(
+        $request,
+        'request()',
+        $request_streaming,
+    );
+
     my $sending_early = !$self->{quic}->ready ? 1 : 0;
 
     if ($sending_early) {
@@ -1480,18 +1492,6 @@ sub request {
         croak 'request(): remembered peer HTTP/3 settings are required for 0-RTT'
             unless $self->{peer_settings_initialized};
     }
-
-    $self->_assert_request_semantics(
-        $request,
-        'request()',
-    );
-    my $request_streaming = defined($stream_body) ? 1 : 0;
-
-    $self->_assert_request_content_length(
-        $request,
-        'request()',
-        $request_streaming,
-    );
 
     my $stream_id = $self->_submit_request(
         $request,
