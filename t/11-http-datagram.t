@@ -197,6 +197,7 @@ my $server_h3 = Unblock::HTTP3::Connection->server(
     quic                    => $server_quic,
     enable_extended_connect => 1,
     enable_http_datagrams   => 1,
+    max_buffered_datagrams  => 1,
     datagram_request        => sub {
         my ($connection, $request) = @_;
         return defined($request->protocol)
@@ -229,6 +230,12 @@ ok($client_h3->can_send_http_datagrams,
     'client can send negotiated HTTP Datagrams');
 ok($server_h3->can_send_http_datagrams,
     'server can send negotiated HTTP Datagrams');
+ok($client_h3->can_receive_http_datagrams,
+    'client can receive negotiated HTTP Datagrams');
+ok($server_h3->can_receive_http_datagrams,
+    'server can receive negotiated HTTP Datagrams');
+is($server_h3->datagram_receive_drops, 0,
+    'HTTP Datagram receive drop counter starts at zero');
 
 my $request = Unblock::HTTP3::Request->new(
     method    => 'CONNECT',
@@ -340,6 +347,31 @@ ok(
 );
 is($empty_payload, '',
     'zero-length HTTP Datagram payload is preserved');
+
+ok(
+    $client_tx->send_datagram('queue-one'),
+    'first buffered HTTP Datagram is accepted',
+);
+ok(
+    $client_tx->send_datagram('queue-two'),
+    'second buffered HTTP Datagram is accepted by the transport',
+);
+
+ok(
+    run_until(sub { return $server_h3->datagram_receive_drops == 1 }),
+    'HTTP layer drops excess unreliable datagram instead of growing its queue',
+);
+
+my $bounded_payload = $server_tx->next_datagram;
+ok(
+    defined($bounded_payload)
+        && ($bounded_payload eq 'queue-one' || $bounded_payload eq 'queue-two'),
+    'bounded queue retains exactly one of the unordered datagrams',
+);
+is($server_tx->next_datagram, undef,
+    'bounded Transaction queue contains only one datagram');
+is($server_h3->datagram_receive_drops, 1,
+    'HTTP Datagram queue overflow is observable');
 
 my $unsupported_request = Unblock::HTTP3::Request->new(
     method    => 'CONNECT',

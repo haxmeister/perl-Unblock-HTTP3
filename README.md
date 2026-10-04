@@ -226,10 +226,10 @@ Transaction:
         datagrams => 1,
     );
 
-Servers use the protocol-neutral C<datagram_request> predicate to decide whether
+Servers use the protocol-neutral `datagram_request` predicate to decide whether
 an incoming request defines HTTP Datagram semantics. The Transaction then owns
-C<send_datagram>, C<next_datagram>, C<on_datagram>, and
-C<max_datagram_payload_size>.
+`send_datagram`, `next_datagram`, `on_datagram`, and
+`max_datagram_payload_size`.
 
 Unblock::HTTP3 handles SETTINGS_H3_DATAGRAM, Quarter Stream IDs, bounded receive
 buffering, and H3_DATAGRAM_ERROR. Higher-level protocols still define what the
@@ -243,8 +243,8 @@ libnghttp3 1.18.0 does not implement HTTP/3 Server Push, so Unblock::HTTP3 does
 not expose Server Push.
 
 WebTransport is not a missing Unblock::HTTP3 feature. It is a higher-level
-protocol which can be built above Unblock::HTTP3 once the required HTTP/3
-extension facilities are available.
+protocol which can be built above the generic HTTP/3 extension facilities
+provided here.
 
 See [MISSING_FEATURES.md](MISSING_FEATURES.md) for the detailed roadmap.
 
