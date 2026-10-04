@@ -33,6 +33,20 @@ libnghttp3 owns the HTTP/3 frame state machine, HEADERS/QPACK decoding, frame
 placement checks, SETTINGS-first enforcement, duplicate critical stream
 detection, GOAWAY validation, and native request/response serialization.
 
+Known native-library limitation:
+
+RFC 9114 requires a detected malformed request or response to be a request
+stream error of type H3_MESSAGE_ERROR. libnghttp3 1.18.0 returns internally
+detected malformed HTTP header and messaging errors from
+`nghttp3_conn_read_stream2()`, whose public contract says any negative return
+is a connection error and the connection object must no longer be used.
+Unblock::HTTP3 handles malformed semantics that reach its Perl validation as
+request-stream H3_MESSAGE_ERROR, but malformed cases rejected inside
+libnghttp3 can therefore close the whole connection.
+
+Current upstream libnghttp3 1.18.90 documents the same contract, so a simple
+library upgrade does not remove this limitation.
+
 Server Push is optional in HTTP/3 and is not exposed by Unblock::HTTP3. Because
 Unblock::HTTP3 never advertises push capacity, incoming push streams are
 unauthorized and are rejected.
