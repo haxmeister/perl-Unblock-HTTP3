@@ -363,11 +363,11 @@ release does not implement it.
 
 The normal test suite uses real kernel UDP sockets, TLS, QUIC, and HTTP/3.
 
-CI tests released CPAN dependencies on Perl 5.20, 5.28, 5.36, and 5.44.
-`distcheck` and `disttest` are part of the release path.
+CI tests released CPAN dependencies on Perl 5.20, 5.28, 5.36, and 5.44 and
+also validates the built distribution.
 
-A separate public interoperability suite talks to independent HTTP/3 servers
-and stays outside the normal CPAN installation tests.
+Public interoperability tests talk to independent HTTP/3 servers but stay
+outside normal CPAN installation tests.
 
 ## More documentation
 
@@ -378,8 +378,6 @@ and stays outside the normal CPAN installation tests.
 - `Unblock::HTTP3::Capsule` - RFC 9297 Capsules
 - `Unblock::HTTP3::Extension::Stream` - generic extension streams
 - `docs/ARCHITECTURE.md` - protocol ownership and internal data flow
-- `docs/INTEROPERABILITY.md` - public interoperability testing
-- `MISSING_FEATURES.md` - deliberately deferred work
 
 ## License
 
