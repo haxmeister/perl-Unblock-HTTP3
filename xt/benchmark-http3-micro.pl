@@ -298,6 +298,27 @@ measure(
         );
     },
 );
+
+my $uniform_native = Unblock::HTTP3::_Native->client(
+    65_536,
+    0,
+    0,
+    0,
+    0,
+);
+
+$uniform_native->bind_streams(2, 6, 10);
+drain_native($uniform_native);
+
+measure(
+    'Native Uniform field sizing',
+    $iterations,
+    sub {
+        $sink = $uniform_native->uniform_request_field_section_size(
+            $request,
+        );
+    },
+);
 my $native = Unblock::HTTP3::_Native->client(
     65_536,
     0,
@@ -326,7 +347,28 @@ measure(
     },
 );
 
+my $uniform_stream_id = 0;
+my $uniform_native_wire_bytes = 0;
+
+measure(
+    'Native Uniform request submission',
+    $native_iterations,
+    sub {
+        $uniform_native->submit_uniform_request(
+            $uniform_stream_id,
+            $request,
+            0,
+        );
+
+        $uniform_native_wire_bytes += drain_native($uniform_native);
+        $uniform_stream_id += 4;
+    },
+);
+
 print "\n";
 print "native_wire_bytes=$native_wire_bytes\n";
 printf "native_wire_bytes_per_request=%.2f\n",
     $native_wire_bytes / $native_iterations;
+print "uniform_native_wire_bytes=$uniform_native_wire_bytes\n";
+printf "uniform_native_wire_bytes_per_request=%.2f\n",
+    $uniform_native_wire_bytes / $native_iterations;
