@@ -3,21 +3,27 @@
 This directory contains development benchmarks. It is excluded from the CPAN
 distribution.
 
-The first benchmark is:
+The benchmark suite currently contains:
 
     xt/benchmark-loopback.pl
+    xt/benchmark-process-loopback.pl
 
-It measures complete HTTP/3 requests over real loopback UDP, TLS, and QUIC.
+Both measure complete HTTP/3 requests over real loopback UDP, TLS, and QUIC.
 Both endpoints use Unblock::HTTP3, while Net::QUIC provides the transport.
 
-This is an end-to-end engine benchmark. It is not a pure libnghttp3 or QPACK
-microbenchmark.
+The first script drives client and server from one Perl process. The second
+forks before either endpoint creates QUIC state, so client and server have
+separate Perl heaps, XS state, sockets, timers, and event-driving loops.
+
+These are end-to-end engine benchmarks. They are not pure libnghttp3 or QPACK
+microbenchmarks.
 
 ## Run it
 
-Build the distribution first, then run:
+Build the distribution first, then run either benchmark:
 
     perl -Iblib/lib -Iblib/arch xt/benchmark-loopback.pl
+    perl -Iblib/lib -Iblib/arch xt/benchmark-process-loopback.pl
 
 Environment variables control the workload:
 
@@ -26,9 +32,13 @@ Environment variables control the workload:
     UNBLOCK_HTTP3_BENCH_BODY_BYTES=1024
     UNBLOCK_HTTP3_BENCH_CONCURRENCY=1,16,64
 
-The benchmark creates a fresh QUIC/HTTP/3 connection for each concurrency
+Each benchmark creates a fresh QUIC/HTTP/3 connection for every concurrency
 level, warms it up, and then measures the requested batch. TLS/QUIC handshake
 time and HTTP/3 SETTINGS startup are excluded from the timed interval.
+
+The split-process result is especially useful for deciding whether a throughput
+limit is caused by HTTP/3 work itself or by making one Perl interpreter drive
+both endpoints serially.
 
 Reported payload throughput counts response body bytes only. Protocol, QUIC,
 UDP, TLS, and packet overhead remain part of the elapsed time.
