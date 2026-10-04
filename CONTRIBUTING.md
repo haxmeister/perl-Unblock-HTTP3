@@ -32,6 +32,12 @@ New protocol behavior should include tests.
 Changes that affect QUIC integration should be exercised through the real
 loopback test when practical.
 
+Public client interoperability can be checked separately with:
+
+    UNBLOCK_HTTP3_PUBLIC_INTEROP=1 prove -lv xt/interop-public.t
+
+Do not move public-network tests into the normal CPAN test path.
+
 ## Style
 
 Keep documentation direct and easy to read.

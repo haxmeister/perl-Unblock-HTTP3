@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP3
 
-0.01  not yet released
+0.01  2026-10-04
     - Start Unblock::HTTP3.
     - Require released Net::QUIC 0.04 for QUIC transport and RFC 9221 DATAGRAM.
     - Use Alien::nghttp3 0.01 for libnghttp3.
@@ -30,6 +30,10 @@ Revision history for Unblock-HTTP3
     - Add RFC 9297 HTTP Datagrams over Net::QUIC 0.04, including
       SETTINGS_H3_DATAGRAM, Quarter Stream ID routing, Transaction send/receive
       APIs, bounded receive buffering, and H3_DATAGRAM_ERROR handling.
+    - Add persistent opaque HTTP/3 SETTINGS state for 0-RTT.
+    - Add explicit replay-aware 0-RTT requests and HTTP Datagrams.
+    - Validate accepted 0-RTT SETTINGS, including RFC 9204 QPACK rules.
+    - Roll rejected QUIC 0-RTT back to fresh HTTP/3 state for safe 1-RTT retry.
     - Add generic HTTP/3 extension unidirectional streams.
     - Add RFC 9218 request priority fields and live Transaction priority updates.
     - Synchronize libnghttp3 client-stream ID validation with Net::QUIC stream limits.
@@ -59,3 +63,5 @@ Revision history for Unblock-HTTP3
     - Keep event loops, UDP sockets, TLS, and QUIC packet processing
       outside Unblock::HTTP3.
     - Test dependencies from CPAN rather than GitHub development code.
+    - Add public interoperability tests against Cloudflare and LiteSpeed HTTP/3
+      servers, with Google retained as a diagnostic target.

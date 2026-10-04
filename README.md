@@ -3,6 +3,7 @@
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP3.svg)](https://metacpan.org/dist/Unblock-HTTP3)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP3.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP3)
 [![CI](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml)
+[![Public HTTP/3 interop](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/interop.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/interop.yml)
 [![License](https://img.shields.io/cpan/l/Unblock-HTTP3.svg)](https://github.com/haxmeister/perl-Unblock-HTTP3/blob/main/LICENSE)
 [![Perl](https://img.shields.io/badge/perl-5.20%2B-blue.svg)](https://www.perl.org/)
 [![nghttp3](https://img.shields.io/badge/nghttp3-1.18.0-blue.svg)](https://github.com/ngtcp2/nghttp3)
@@ -63,6 +64,7 @@ Unblock::HTTP3 supports:
 - support basic and generic Extended CONNECT tunnels
 - frame, parse, send, and receive generic RFC 9297 Capsules
 - negotiate, route, send, and receive RFC 9297 HTTP Datagrams
+- retain and validate HTTP/3 SETTINGS for safe 0-RTT requests and Datagrams
 - cancel requests and handle RESET_STREAM and STOP_SENDING
 - apply bounded output and receive buffering
 - limit decoded field sections and message bodies
@@ -76,7 +78,8 @@ Unblock::HTTP3 supports:
 - close QUIC cleanly when libnghttp3 reports a fatal parser error
 
 The real integration tests use kernel UDP sockets and a real QUIC/TLS
-handshake.
+handshake. A separate public interoperability suite also talks directly to
+independent HTTP/3 servers operated by Cloudflare and LiteSpeed.
 
 ## Main objects
 
@@ -249,9 +252,51 @@ Unblock::HTTP3 handles SETTINGS_H3_DATAGRAM, Quarter Stream IDs, bounded receive
 buffering, and H3_DATAGRAM_ERROR. Higher-level protocols still define what the
 payload bytes mean.
 
-HTTP Datagram 0-RTT is intentionally not enabled yet. Net::QUIC exposes the
-transport capability, but Unblock::HTTP3 does not currently persist and validate
-the HTTP/3 SETTINGS state required for safe RFC 9297 0-RTT use.
+## 0-RTT and remembered HTTP/3 SETTINGS
+
+Net::QUIC owns the QUIC/TLS early-data state. Unblock::HTTP3 separately owns
+the HTTP/3 SETTINGS state that controls what can safely be sent before the new
+server SETTINGS frame arrives.
+
+After a successful client connection has received the peer SETTINGS, save both
+opaque values from the same session:
+
+    my $quic_early = $quic->early_data_state;
+    my $h3_settings = $h3->peer_settings_state;
+
+A returning client gives the QUIC state back to Net::QUIC and the HTTP/3 state
+back to Unblock::HTTP3:
+
+    my $h3 = Unblock::HTTP3::Connection->client(
+        quic                     => $quic,
+        remembered_peer_settings => $h3_settings,
+    );
+
+    $h3->start;
+
+A request sent before the QUIC handshake finishes must opt in explicitly:
+
+    my $tx = $h3->request(
+        $request,
+        early_data => 1,
+    );
+
+0-RTT can be replayed by the network. Unblock::HTTP3 never automatically
+retries an early request. If QUIC rejects early data, the early Transaction
+becomes an error, the HTTP/3 state is rebuilt for 1-RTT, and the application
+decides whether the operation is safe to send again.
+
+Servers that accept QUIC early data pass the HTTP/3 settings they advertised
+for the resumed session as `remembered_local_settings`. `local_settings_state`
+returns an opaque value suitable for this purpose. A server must disable or
+reject 0-RTT when it cannot determine that the remembered settings are
+compatible with its current configuration.
+
+The new peer SETTINGS are validated after accepted 0-RTT. Reduced limits and
+missing previously non-default settings fail with H3_SETTINGS_ERROR. QPACK's
+remembered nonzero table capacity follows RFC 9204's stricter exact-value rule.
+RFC 9297 SETTINGS_H3_DATAGRAM state is retained too, so HTTP Datagrams can be
+used in 0-RTT when both the saved HTTP/3 and QUIC transport state allow them.
 
 libnghttp3 1.18.0 does not implement HTTP/3 Server Push, so Unblock::HTTP3 does
 not expose Server Push.

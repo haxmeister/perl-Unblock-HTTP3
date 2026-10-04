@@ -71,6 +71,12 @@ WriteMakefile(
         'meta-spec' => {
             version => 2,
         },
+        no_index => {
+            package => [
+                'Unblock::HTTP3::_Bytes',
+                'Unblock::HTTP3::_Native',
+            ],
+        },
         provides => {
             'Unblock::HTTP3' => {
                 file    => 'lib/Unblock/HTTP3.pm',
