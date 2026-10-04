@@ -4007,7 +4007,8 @@ sub _assert_peer_field_section_size_value {
 sub _assert_peer_field_section_size {
     my ($self, $fields, $operation) = @_;
 
-    return $self->_assert_peer_field_section_size_value(
+    return _assert_peer_field_section_size_value(
+        $self,
         _field_section_size($fields),
         $operation,
     );
