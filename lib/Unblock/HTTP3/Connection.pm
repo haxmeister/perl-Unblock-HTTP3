@@ -2574,7 +2574,6 @@ sub _cleanup_stream_if_done {
     delete $self->{messages}{$id};
     delete $self->{outgoing}{$id};
     delete $self->{stream_lifecycle}{$id};
-    delete $self->{building}{$id};
     delete $self->{trailer_field_section_size}{$id};
     delete $self->{output_finished}{$id};
     delete $self->{response_sent}{$id};
@@ -2829,7 +2828,6 @@ sub _rollback_rejected_early_data {
     $self->{messages} = {};
     $self->{outgoing} = {};
     $self->{stream_lifecycle} = {};
-    $self->{building} = {};
     $self->{trailer_field_section_size} = {};
     $self->{output_finished} = {};
     $self->{response_sent} = {};
@@ -3329,8 +3327,7 @@ sub _service_stream {
             $self->{native}->discard_body($id);
             delete $self->{streams}{$id};
             delete $self->{stream_lifecycle}{$id};
-            delete $self->{building}{$id};
-            delete $self->{rejected_streams}{$id};
+                    delete $self->{rejected_streams}{$id};
         }
 
         return;
@@ -3706,38 +3703,6 @@ sub _drain_events {
     return;
 }
 
-sub _coalesce_cookie_fields {
-    my ($fields) = @_;
-
-    my @cookie_values = map {
-        $_->[1]
-    } grep {
-        $_->[0] eq 'cookie'
-    } @$fields;
-
-    return $fields if @cookie_values < 2;
-
-    my @normalized;
-    my $inserted;
-
-    for my $field (@$fields) {
-        if ($field->[0] eq 'cookie') {
-            if (!$inserted) {
-                push @normalized, [
-                    'cookie',
-                    join('; ', @cookie_values),
-                ];
-                $inserted = 1;
-            }
-            next;
-        }
-
-        push @normalized, $field;
-    }
-
-    return \@normalized;
-}
-
 sub _coalesce_trailer_cookie_fields {
     my ($message) = @_;
 
@@ -3750,73 +3715,6 @@ sub _coalesce_trailer_cookie_fields {
     );
 
     return 1;
-}
-
-sub _received_message_flags {
-    my ($kind, $fin) = @_;
-
-    my $flags =
-        Uniform::HTTP::FastPath::FLAG_HEADERS_LOSSLESS()
-        | Uniform::HTTP::FastPath::FLAG_TRAILERS_LOSSLESS();
-
-    $flags |= Uniform::HTTP::FastPath::FLAG_TARGET_EXACT()
-        if $kind eq 'request';
-
-    if ($fin) {
-        $flags |= Uniform::HTTP::FastPath::FLAG_COMPLETE();
-    } else {
-        $flags |= Uniform::HTTP::FastPath::FLAG_MUTABLE()
-            | Uniform::HTTP::FastPath::FLAG_BODY_MUTABLE()
-            | Uniform::HTTP::FastPath::FLAG_TRAILERS_MUTABLE();
-    }
-
-    return $flags;
-}
-
-sub _received_request {
-    my ($args, $fin) = @_;
-
-    my $view = [
-        Uniform::HTTP::FastPath::ABI_VERSION(),
-        Uniform::HTTP::FastPath::KIND_REQUEST(),
-        _received_message_flags('request', $fin),
-        '3',
-        $args->{method},
-        $args->{target},
-        $args->{scheme},
-        $args->{authority},
-        $args->{protocol},
-        undef,
-        undef,
-        _coalesce_cookie_fields($args->{headers}),
-        [],
-        undef,
-    ];
-
-    return Uniform::HTTP::FastPath::request_from_validated($view);
-}
-
-sub _received_response {
-    my ($status, $headers, $fin) = @_;
-
-    my $view = [
-        Uniform::HTTP::FastPath::ABI_VERSION(),
-        Uniform::HTTP::FastPath::KIND_RESPONSE(),
-        _received_message_flags('response', $fin),
-        '3',
-        undef,
-        undef,
-        undef,
-        undef,
-        undef,
-        $status,
-        undef,
-        _coalesce_cookie_fields($headers),
-        [],
-        undef,
-    ];
-
-    return Uniform::HTTP::FastPath::response_from_validated($view);
 }
 
 sub _finish_headers {
