@@ -23,6 +23,16 @@ my $H3_REQUEST_CANCELLED = 0x010c;
 my $H3_MESSAGE_ERROR = 0x010e;
 my $HTTP3_MAX_VARINT = '4611686018427387903';
 my $HTTP3_MAX_QUARTER_STREAM_ID = '1152921504606846975';
+my $SETTINGS_STATE_MAGIC = "UH3S";
+my $SETTINGS_STATE_VERSION = 1;
+
+my %SETTING_DEFAULT = (
+    1  => '0',
+    6  => $HTTP3_MAX_VARINT,
+    7  => '0',
+    8  => '0',
+    51 => '0',
+);
 
 my %CORE_SETTING_ID = map { $_ => 1 } qw(1 6 7 8 51);
 my %RESERVED_SETTING_ID = map { $_ => 1 } qw(0 2 3 4 5);
@@ -198,6 +208,132 @@ sub _decode_http3_varint {
     }
 
     return ("$value", $length);
+}
+
+sub _encode_settings_state {
+    my ($settings) = @_;
+
+    croak 'HTTP/3 settings state requires a hash reference'
+        unless ref($settings) eq 'HASH';
+
+    my @ids = sort {
+        length($a) <=> length($b)
+            || $a cmp $b
+    } keys %$settings;
+
+    my $out = $SETTINGS_STATE_MAGIC
+        . pack('C', $SETTINGS_STATE_VERSION)
+        . _encode_http3_varint(scalar @ids);
+
+    for my $id (@ids) {
+        my $normalized_id = _normalize_http3_varint(
+            $id,
+            'settings state identifier',
+        );
+        my $value = _normalize_http3_varint(
+            $settings->{$id},
+            "settings state value for $normalized_id",
+        );
+
+        $out .= _encode_http3_varint($normalized_id);
+        $out .= _encode_http3_varint($value);
+    }
+
+    return $out;
+}
+
+sub _decode_settings_state {
+    my ($state, $name) = @_;
+    $name ||= 'HTTP/3 settings state';
+
+    croak "$name must be an opaque byte string returned by Unblock::HTTP3"
+        if !defined($state) || ref($state);
+
+    my $header_length = length($SETTINGS_STATE_MAGIC) + 1;
+    croak "invalid $name"
+        if length($state) < $header_length
+            || substr($state, 0, length($SETTINGS_STATE_MAGIC))
+                ne $SETTINGS_STATE_MAGIC
+            || ord(substr($state, length($SETTINGS_STATE_MAGIC), 1))
+                != $SETTINGS_STATE_VERSION;
+
+    my $offset = $header_length;
+    my ($count, $count_length) = _decode_http3_varint($state, $offset);
+    croak "invalid $name" unless defined $count;
+    $offset += $count_length;
+
+    my %settings;
+
+    for (1 .. 0 + $count) {
+        my ($id, $id_length) = _decode_http3_varint($state, $offset);
+        croak "invalid $name" unless defined $id;
+        $offset += $id_length;
+
+        my ($value, $value_length) = _decode_http3_varint($state, $offset);
+        croak "invalid $name" unless defined $value;
+        $offset += $value_length;
+
+        croak "invalid $name: duplicate setting $id"
+            if exists $settings{$id};
+
+        $settings{$id} = $value;
+    }
+
+    croak "invalid $name: trailing bytes"
+        if $offset != length($state);
+
+    return \%settings;
+}
+
+sub _effective_setting {
+    my ($settings, $id) = @_;
+
+    return $settings->{$id}
+        if exists $settings->{$id};
+
+    return $SETTING_DEFAULT{$id}
+        if exists $SETTING_DEFAULT{$id};
+
+    return;
+}
+
+sub _settings_compatibility_error {
+    my ($remembered, $current) = @_;
+
+    for my $id (qw(1 6 7 8 51)) {
+        my $old = _effective_setting($remembered, $id);
+        my $new = _effective_setting($current, $id);
+
+        if ($id == 6) {
+            return "SETTINGS_MAX_FIELD_SECTION_SIZE decreased from $old to $new"
+                if _decimal_less_than($new, $old);
+        } else {
+            return "HTTP/3 setting $id decreased from $old to $new"
+                if _decimal_less_than($new, $old);
+        }
+
+        if (
+            exists($remembered->{$id})
+            && $remembered->{$id} ne $SETTING_DEFAULT{$id}
+            && !exists($current->{$id})
+        ) {
+            return "HTTP/3 setting $id was previously non-default but is now omitted";
+        }
+    }
+
+    my %ids = map { $_ => 1 } (
+        grep { _is_peer_extension_setting_id($_) } keys %$remembered,
+        grep { _is_peer_extension_setting_id($_) } keys %$current,
+    );
+
+    for my $id (keys %ids) {
+        return "extension setting $id changed across 0-RTT"
+            if !exists($remembered->{$id})
+                || !exists($current->{$id})
+                || $remembered->{$id} ne $current->{$id};
+    }
+
+    return;
 }
 
 sub _normalize_extension_settings {
@@ -395,6 +531,9 @@ sub _inspect_peer_settings_bytes {
                     _is_peer_extension_setting_id($_)
                 } keys %{ $state->{settings} };
 
+                $self->{pending_peer_settings} = {
+                    %{ $state->{settings} },
+                };
                 $self->{pending_peer_extension_settings} = \%extension;
                 $state->{stage} = 'done';
                 $state->{buffer} = '';
@@ -444,11 +583,35 @@ sub _inspect_peer_settings_bytes {
 sub _accept_peer_extension_settings {
     my ($self) = @_;
 
+    my $all_settings = delete $self->{pending_peer_settings};
+    $all_settings = {} unless defined $all_settings;
+
+    if (
+        defined($self->{remembered_peer_settings})
+        && $self->{quic}->early_data_status eq 'accepted'
+    ) {
+        my $compatibility_error = _settings_compatibility_error(
+            $self->{remembered_peer_settings},
+            $all_settings,
+        );
+
+        if (defined $compatibility_error) {
+            $self->_fail_connection(
+                $H3_SETTINGS_ERROR,
+                "peer SETTINGS are incompatible with accepted 0-RTT: "
+                    . $compatibility_error,
+            );
+            return;
+        }
+    }
+
     my $settings = delete $self->{pending_peer_extension_settings};
     $settings = {} unless defined $settings;
 
+    $self->{peer_settings_wire} = { %$all_settings };
     $self->{peer_extension_settings} = { %$settings };
     $self->{peer_settings_received} = 1;
+    $self->{peer_settings_initialized} = 1;
 
     my $callback = $self->{on_extension_settings};
     return 1 unless defined $callback;
@@ -666,11 +829,32 @@ sub _new {
     my $extension_settings = _normalize_extension_settings(
         delete $args{extension_settings},
     );
+    my $remembered_peer_settings_state =
+        delete $args{remembered_peer_settings};
+    my $remembered_local_settings_state =
+        delete $args{remembered_local_settings};
+    my $remembered_peer_settings = defined($remembered_peer_settings_state)
+        ? _decode_settings_state(
+            $remembered_peer_settings_state,
+            'remembered_peer_settings',
+        )
+        : undef;
+    my $remembered_local_settings = defined($remembered_local_settings_state)
+        ? _decode_settings_state(
+            $remembered_local_settings_state,
+            'remembered_local_settings',
+        )
+        : undef;
     my $on_extension_settings = delete $args{on_extension_settings};
     my $extension_stream_handlers =
         _normalize_extension_stream_handlers(
             delete $args{extension_stream_handlers},
         );
+
+    croak 'remembered_peer_settings is only valid for a client connection'
+        if $role ne 'client' && defined $remembered_peer_settings;
+    croak 'remembered_local_settings is only valid for a server connection'
+        if $role ne 'server' && defined $remembered_local_settings;
 
     croak 'on_extension_settings must be a code reference'
         if defined($on_extension_settings)
@@ -759,6 +943,27 @@ sub _new {
     croak 'unknown connection option: ' . join(', ', sort keys %args)
         if %args;
 
+    my %local_settings = (
+        1 => "$qpack_max_table_capacity",
+        6 => "$max_field_section_size",
+        7 => "$qpack_blocked_streams",
+    );
+    $local_settings{8} = '1' if $enable_extended_connect;
+    $local_settings{51} = '1' if $enable_http_datagrams;
+    @local_settings{keys %$extension_settings}
+        = values %$extension_settings;
+
+    if (defined $remembered_local_settings) {
+        my $compatibility_error = _settings_compatibility_error(
+            $remembered_local_settings,
+            \%local_settings,
+        );
+
+        croak "remembered_local_settings is incompatible with current HTTP/3 settings: "
+            . $compatibility_error
+            if defined $compatibility_error;
+    }
+
     my $native = $role eq 'server'
         ? Unblock::HTTP3::_Native->server(
             $max_field_section_size,
@@ -790,12 +995,22 @@ sub _new {
         qpack_blocked_streams     => 0 + $qpack_blocked_streams,
         quic_max_bidi_streams       => 0 + $quic_max_bidi_streams,
         native_max_client_streams_bidi => 0 + $quic_max_bidi_streams,
-        peer_max_field_section_size => $HTTP3_MAX_VARINT,
+        local_settings               => \%local_settings,
+        remembered_peer_settings      => $remembered_peer_settings,
+        remembered_local_settings     => $remembered_local_settings,
+        peer_settings_wire            => {},
+        peer_max_field_section_size => defined($remembered_peer_settings)
+            ? _effective_setting($remembered_peer_settings, 6)
+            : $HTTP3_MAX_VARINT,
         receive_body_mode         => $receive_body,
         enable_extended_connect    => $enable_extended_connect ? 1 : 0,
-        peer_enable_connect_protocol => 0,
+        peer_enable_connect_protocol => defined($remembered_peer_settings)
+            && _effective_setting($remembered_peer_settings, 8) eq '1'
+            ? 1 : 0,
         enable_http_datagrams       => $enable_http_datagrams ? 1 : 0,
-        peer_h3_datagram            => 0,
+        peer_h3_datagram            => defined($remembered_peer_settings)
+            && _effective_setting($remembered_peer_settings, 51) eq '1'
+            ? 1 : 0,
         datagram_request            => $datagram_request,
         max_buffered_datagram_bytes => 0 + $max_buffered_datagram_bytes,
         max_buffered_datagrams      => 0 + $max_buffered_datagrams,
@@ -803,8 +1018,17 @@ sub _new {
         datagram_buffered_count     => 0,
         datagram_receive_drops      => 0,
         extension_settings        => $extension_settings,
-        peer_extension_settings   => {},
+        peer_extension_settings   => defined($remembered_peer_settings)
+            ? {
+                map {
+                    $_ => $remembered_peer_settings->{$_}
+                } grep {
+                    _is_peer_extension_setting_id($_)
+                } keys %$remembered_peer_settings
+            }
+            : {},
         peer_settings_received     => 0,
+        peer_settings_initialized  => defined($remembered_peer_settings) ? 1 : 0,
         peer_settings_parser       => {},
         on_extension_settings      => $on_extension_settings,
         control_settings_rewritten => 0,
@@ -909,6 +1133,30 @@ sub qpack_blocked_streams {
     return $self->{qpack_blocked_streams};
 }
 
+sub local_settings_state {
+    my ($self, @args) = @_;
+    croak 'local_settings_state() does not accept arguments' if @args;
+    return _encode_settings_state($self->{local_settings});
+}
+
+sub peer_settings_state {
+    my ($self, @args) = @_;
+    croak 'peer_settings_state() does not accept arguments' if @args;
+    return unless $self->{peer_settings_received};
+    return _encode_settings_state($self->{peer_settings_wire});
+}
+
+sub using_remembered_peer_settings {
+    my ($self, @args) = @_;
+    croak 'using_remembered_peer_settings() does not accept arguments'
+        if @args;
+
+    return defined($self->{remembered_peer_settings})
+        && !$self->{peer_settings_received}
+        ? 1
+        : 0;
+}
+
 sub extension_settings {
     my ($self, @args) = @_;
     croak 'extension_settings() does not accept arguments' if @args;
@@ -997,7 +1245,7 @@ sub can_send_http_datagrams {
     croak 'can_send_http_datagrams() does not accept arguments' if @args;
 
     return 0 unless $self->{enable_http_datagrams};
-    return 0 unless $self->{peer_settings_received};
+    return 0 unless $self->{peer_settings_initialized};
     return 0 unless $self->{peer_h3_datagram};
 
     return $self->{quic}->can_send_datagram ? 1 : 0;
@@ -1008,7 +1256,7 @@ sub can_receive_http_datagrams {
     croak 'can_receive_http_datagrams() does not accept arguments' if @args;
 
     return 0 unless $self->{enable_http_datagrams};
-    return 0 unless $self->{peer_settings_received};
+    return 0 unless $self->{peer_settings_initialized};
     return 0 unless $self->{peer_h3_datagram};
 
     return $self->{quic}->can_receive_datagram ? 1 : 0;
