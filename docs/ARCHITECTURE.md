@@ -19,6 +19,7 @@ It owns:
 - generic RFC 9297 Capsule Protocol streams
 - RFC 9297 HTTP Datagrams over QUIC DATAGRAM
 - generic HTTP/3 extension unidirectional streams
+- RFC 9412 ORIGIN frames
 - RFC 9218 request priority
 - HTTP message validation
 - HTTP/3 stream lifecycle and errors
@@ -334,6 +335,22 @@ callback handles the bytes.
 
 Unblock::HTTP3 does not expose a generic raw extension-frame writer on request or
 control streams. Those streams remain owned by libnghttp3.
+
+## ORIGIN
+
+RFC 9412 ORIGIN frames remain on the HTTP/3 control stream and are owned by
+libnghttp3.
+
+A server can configure an origin list when the HTTP/3 Connection is created.
+Unblock::HTTP3 serializes the RFC 6454 ASCII origins into the length-prefixed
+payload expected by libnghttp3. An explicitly empty list sends an empty ORIGIN
+frame; omitting the option sends no ORIGIN frame.
+
+On the client, libnghttp3 reports each origin entry and the end of each ORIGIN
+frame. Unblock::HTTP3 ignores entries that are not valid RFC 6454 ASCII origin
+serializations and exposes the cumulative advertised entries through
+`peer_origins`. It does not make connection-coalescing policy decisions for the
+application.
 
 ## Request priority
 
