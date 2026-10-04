@@ -38,6 +38,13 @@ my %SETTING_DEFAULT = (
 my %CORE_SETTING_ID = map { $_ => 1 } qw(1 6 7 8 51);
 my %RESERVED_SETTING_ID = map { $_ => 1 } qw(0 2 3 4 5);
 my %CORE_STREAM_TYPE = map { $_ => 1 } qw(0 1 2 3);
+my %CONNECTION_SPECIFIC_FIELD = map { $_ => 1 } qw(
+    connection
+    keep-alive
+    proxy-connection
+    transfer-encoding
+    upgrade
+);
 
 sub _decimal_mod {
     my ($value, $divisor) = @_;
@@ -3692,16 +3699,8 @@ sub _finish_headers {
 sub _validate_wire_field {
     my ($context, $name, $value) = @_;
 
-    my %forbidden = map { $_ => 1 } qw(
-        connection
-        keep-alive
-        proxy-connection
-        transfer-encoding
-        upgrade
-    );
-
     croak "HTTP/3 does not allow connection-specific field '$name'"
-        if $forbidden{$name};
+        if $CONNECTION_SPECIFIC_FIELD{$name};
 
     if ($name eq 'te') {
         croak "HTTP/3 TE is only allowed in request headers"
