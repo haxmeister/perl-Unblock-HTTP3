@@ -288,9 +288,15 @@ ok(
     'server accepts the returning QUIC connection',
 );
 
+my $early_datagram_policy_calls = 0;
 my $second_server_h3 = h3_server(
     $second_server_quic,
     remembered_local_settings => $remembered_local,
+    datagram_request => sub {
+        my ($connection, $request) = @_;
+        ++$early_datagram_policy_calls;
+        return $request->target eq '/early' ? 1 : 0;
+    },
 );
 $second_server_h3->start;
 
@@ -298,6 +304,11 @@ is(
     $second_server_h3->next_transaction,
     undef,
     'server does not expose a 0-RTT request before handshake acceptance',
+);
+is(
+    $early_datagram_policy_calls,
+    0,
+    'server does not invoke application Datagram policy before handshake acceptance',
 );
 
 ok(
@@ -319,6 +330,12 @@ ok(
         return defined $early_server_tx;
     }),
     'accepted 0-RTT request becomes application-visible after the handshake',
+);
+
+is(
+    $early_datagram_policy_calls,
+    1,
+    'server invokes application Datagram policy once after handshake acceptance',
 );
 
 ok($early_server_tx->early_data,
