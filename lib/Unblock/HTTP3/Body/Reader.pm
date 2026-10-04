@@ -7,7 +7,7 @@ use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
 use Unblock::HTTP3 ();
-use Unblock::HTTP3::_Message ();
+use Unblock::HTTP3::_Bytes ();
 
 our $VERSION = '0.01';
 
@@ -149,7 +149,7 @@ sub _push {
 
     return if $self->{cancelled};
 
-    $bytes = Unblock::HTTP3::_Message::_byte_string(
+    $bytes = Unblock::HTTP3::_Bytes::byte_string(
         'received body',
         $bytes,
     );

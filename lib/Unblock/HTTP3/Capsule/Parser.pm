@@ -7,7 +7,7 @@ use Carp qw(croak);
 
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::Capsule ();
-use Unblock::HTTP3::_Message ();
+use Unblock::HTTP3::_Bytes ();
 
 our $VERSION = '0.01';
 
@@ -138,7 +138,7 @@ sub feed {
     croak 'feed() cannot be called after finish()'
         if $self->{finished};
 
-    $bytes = Unblock::HTTP3::_Message::_byte_string(
+    $bytes = Unblock::HTTP3::_Bytes::byte_string(
         'Capsule Protocol bytes',
         $bytes,
     );

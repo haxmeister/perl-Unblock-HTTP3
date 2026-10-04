@@ -7,7 +7,7 @@ use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
 use Unblock::HTTP3 ();
-use Unblock::HTTP3::_Message ();
+use Unblock::HTTP3::_Bytes ();
 
 our $VERSION = '0.01';
 
@@ -76,7 +76,7 @@ sub write {
     my $operation = $self->{kind} . '_body->write';
     my $transaction = $self->_assert_writable($operation);
 
-    $bytes = Unblock::HTTP3::_Message::_byte_string('body', $bytes);
+    $bytes = Unblock::HTTP3::_Bytes::byte_string('body', $bytes);
 
     $self->{flow_blocked} = 1;
 
@@ -112,7 +112,7 @@ sub complete {
     my $operation = $self->{kind} . '_body->complete';
     my $transaction = $self->_assert_writable($operation);
 
-    $bytes = Unblock::HTTP3::_Message::_byte_string('body', $bytes);
+    $bytes = Unblock::HTTP3::_Bytes::byte_string('body', $bytes);
 
     $transaction->_write_body(
         $self->{kind},

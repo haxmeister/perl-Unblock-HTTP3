@@ -7,7 +7,7 @@ use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
 use Unblock::HTTP3 ();
-use Unblock::HTTP3::_Message ();
+use Unblock::HTTP3::_Bytes ();
 
 our $VERSION = '0.01';
 
@@ -170,7 +170,7 @@ sub send {
     croak 'peer stopped the extension stream send side'
         if defined $self->{stop_code};
 
-    $bytes = Unblock::HTTP3::_Message::_byte_string(
+    $bytes = Unblock::HTTP3::_Bytes::byte_string(
         'extension stream data',
         $bytes,
     );
@@ -189,7 +189,7 @@ sub send_some {
     croak 'peer stopped the extension stream send side'
         if defined $self->{stop_code};
 
-    $bytes = Unblock::HTTP3::_Message::_byte_string(
+    $bytes = Unblock::HTTP3::_Bytes::byte_string(
         'extension stream data',
         $bytes,
     );

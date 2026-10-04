@@ -14,7 +14,7 @@ use Unblock::HTTP3::Extension::Stream;
 use Unblock::HTTP3::Request;
 use Unblock::HTTP3::Response;
 use Unblock::HTTP3::Transaction;
-use Unblock::HTTP3::_Message;
+use Unblock::HTTP3::_Bytes;
 use Unblock::HTTP3::_Native;
 
 pass('Unblock::HTTP3 modules load');
@@ -31,7 +31,7 @@ my @versioned_modules = (
     [ 'Unblock::HTTP3::Request',      $Unblock::HTTP3::Request::VERSION ],
     [ 'Unblock::HTTP3::Response',     $Unblock::HTTP3::Response::VERSION ],
     [ 'Unblock::HTTP3::Transaction',  $Unblock::HTTP3::Transaction::VERSION ],
-    [ 'Unblock::HTTP3::_Message',     $Unblock::HTTP3::_Message::VERSION ],
+    [ 'Unblock::HTTP3::_Bytes',       $Unblock::HTTP3::_Bytes::VERSION ],
     [ 'Unblock::HTTP3::_Native',      $Unblock::HTTP3::_Native::VERSION ],
 );
 

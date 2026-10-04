@@ -6,7 +6,7 @@ use warnings;
 use Carp qw(croak);
 
 use Unblock::HTTP3 ();
-use Unblock::HTTP3::_Message ();
+use Unblock::HTTP3::_Bytes ();
 
 our $VERSION = '0.01';
 
@@ -94,7 +94,7 @@ sub new {
         if %args;
 
     $type = _normalize_varint($type, 'Capsule type');
-    $value = Unblock::HTTP3::_Message::_byte_string('Capsule value', $value);
+    $value = Unblock::HTTP3::_Bytes::byte_string('Capsule value', $value);
 
     return bless {
         type  => $type,
