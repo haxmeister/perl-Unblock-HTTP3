@@ -37,7 +37,7 @@ sub buffered_transaction {
     return bless {
         response                 => $response,
         response_receive_mode    => 'buffered',
-        response_buffered_body   => [],
+        response_buffered_body   => '',
         response_buffered_tail   => '',
         response_buffered_bytes  => 0,
         response_buffered_seen   => 0,
@@ -52,11 +52,11 @@ sub terminal_transaction {
         datagram_queue           => [],
         datagram_callback        => undef,
         state                    => 'active',
-        request_buffered_body    => [],
+        request_buffered_body    => '',
         request_buffered_tail    => '',
         request_buffered_bytes   => 0,
         request_buffered_seen    => 0,
-        response_buffered_body   => [],
+        response_buffered_body   => '',
         response_buffered_tail   => '',
         response_buffered_bytes  => 0,
         response_buffered_seen   => 0,
@@ -98,14 +98,50 @@ is(
     'buffered receive byte accounting returns to zero after finalization',
 );
 is(
-    scalar @{ $buffered->{response_buffered_body} },
-    0,
-    'buffered receive releases retained chunks after finalization',
+    $buffered->{response_buffered_body},
+    '',
+    'buffered receive releases buffered storage after finalization',
 );
 is(
     $buffered->{response_buffered_tail},
     '',
     'buffered receive releases the small-chunk slab after finalization',
+);
+
+my $large_response = Unblock::HTTP3::Response->new(status => 200);
+my $large = buffered_transaction($large_response);
+my $large_first = 'A' x 16_384;
+my $large_second = 'B' x 65_536;
+my $large_expected = $large_first . $large_second;
+
+$large->_append_buffered_body('response', $large_first);
+$large->_append_buffered_body('response', $large_second);
+
+is(
+    $large->_buffered_body_bytes('response'),
+    length($large_expected),
+    'large buffered chunks use accurate retained-byte accounting',
+);
+
+$large_first = 'changed-large-first';
+$large_second = 'changed-large-second';
+
+$large->_finish_received_message('response');
+
+is(
+    $large_response->body,
+    $large_expected,
+    'large retained buffered chunks survive caller mutation and coalesce correctly',
+);
+is(
+    $large->_buffered_body_bytes('response'),
+    0,
+    'large buffered receive accounting returns to zero after finalization',
+);
+is(
+    $large->{response_buffered_body},
+    '',
+    'large retained chunk storage is released after finalization',
 );
 
 my $single_response = Unblock::HTTP3::Response->new(status => 200);
@@ -229,7 +265,7 @@ is(
 is($cancel_calls, 1, 'streaming cancellation callback runs once');
 
 my $error_tx = terminal_transaction();
-$error_tx->_append_buffered_body('response', 'retained-on-error');
+$error_tx->_append_buffered_body('response', 'E' x 16_384);
 ok(
     $error_tx->_buffered_body_bytes('response') > 0,
     'error cleanup test starts with retained buffered data',
@@ -244,9 +280,9 @@ is(
     'transaction error releases buffered receive accounting',
 );
 is(
-    scalar @{ $error_tx->{response_buffered_body} },
-    0,
-    'transaction error releases buffered receive chunks',
+    $error_tx->{response_buffered_body},
+    '',
+    'transaction error releases buffered receive storage',
 );
 is(
     $error_tx->{response_buffered_tail},
@@ -255,7 +291,7 @@ is(
 );
 
 my $cancel_tx = terminal_transaction();
-$cancel_tx->_append_buffered_body('request', 'retained-on-cancel');
+$cancel_tx->_append_buffered_body('request', 'C' x 65_536);
 ok(
     $cancel_tx->_buffered_body_bytes('request') > 0,
     'cancel cleanup test starts with retained buffered data',
@@ -270,9 +306,9 @@ is(
     'transaction cancellation releases buffered receive accounting',
 );
 is(
-    scalar @{ $cancel_tx->{request_buffered_body} },
-    0,
-    'transaction cancellation releases buffered receive chunks',
+    $cancel_tx->{request_buffered_body},
+    '',
+    'transaction cancellation releases buffered receive storage',
 );
 is(
     $cancel_tx->{request_buffered_tail},
