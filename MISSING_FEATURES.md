@@ -2,8 +2,8 @@
 
 Unblock::HTTP3 0.01 implements the core HTTP/3 engine planned for the first
 release. There is no known missing core feature that blocks normal client,
-server, multiplexing, streaming, CONNECT, Capsule, HTTP Datagram, priority,
-graceful shutdown, or 0-RTT use.
+server, multiplexing, streaming, CONNECT, Capsule, HTTP Datagram, RFC 9412
+ORIGIN, priority, graceful shutdown, or 0-RTT use.
 
 This file records work that is deliberately deferred so it does not get lost.
 
@@ -18,9 +18,9 @@ to add it.
 
 ## Arbitrary extension frames
 
-Unblock::HTTP3 supports generic extension SETTINGS, Extended CONNECT protocol
-identifiers, Capsule types, HTTP Datagrams, and extension unidirectional
-streams.
+Unblock::HTTP3 supports generic extension SETTINGS, RFC 9412 ORIGIN, Extended
+CONNECT protocol identifiers, Capsule types, HTTP Datagrams, and extension
+unidirectional streams.
 
 It does not expose a general arbitrary-frame writer on request or control
 streams. libnghttp3 owns framing, output offsets, and acknowledgement
