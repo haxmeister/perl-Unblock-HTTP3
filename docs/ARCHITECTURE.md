@@ -53,17 +53,31 @@ ngtcp2 and TLS remain below Net::QUIC.
 
 ## HTTP message objects
 
-Unblock::HTTP3::Request and Unblock::HTTP3::Response follow the Uniform::HTTP message
-contract.
+Uniform::HTTP 0.04 is the runtime HTTP message layer.
 
-They remain Unblock::HTTP3 classes because live HTTP/3 messages also need protocol
-state such as completion, cancellation, trailers, and body streaming.
+C<Unblock::HTTP3::Request> is a thin subclass of C<Uniform::HTTP::Request>.
+C<Unblock::HTTP3::Response> is a thin subclass of
+C<Uniform::HTTP::Response>. They inherit the common message implementation
+instead of copying it.
 
-They do not inherit from Uniform::HTTP::Request or Uniform::HTTP::Response.
+A client may also submit a plain C<Uniform::HTTP::Request> directly.
+Unblock::HTTP3 validates the request for HTTP/3 when it is sent. This keeps
+Uniform neutral: it can represent temporarily incomplete or cross-field-invalid
+message combinations while the selected protocol engine remains responsible
+for deciding what is legal on its wire.
 
-This follows the same general model as Linux::Event::HTTP: common message
-behavior without replacing live protocol objects with detached message
-objects.
+Uniform owns:
+
+- method, target, scheme, authority, and Extended CONNECT protocol metadata
+- status and reason metadata
+- ordered headers and trailers
+- complete buffered bodies
+- header and trailer fidelity
+- section mutability and whole-message completeness
+
+Unblock::HTTP3 adds only protocol-engine concerns. Its Request convenience
+subclass adds RFC 9218 priority helpers and stream-abort diagnostics. Its
+Response convenience subclass adds stream-abort diagnostics.
 
 ## Transactions
 
@@ -75,7 +89,8 @@ streams are active and responses arrive out of order.
 
 It also owns:
 
-- request and response body streams
+- request and response streaming-body state
+- buffered receive accumulation until a complete Uniform body is available
 - informational responses
 - HTTP Datagram send and receive state
 - live RFC 9218 request priority
@@ -95,11 +110,13 @@ Receive data follows this path:
         -> HTTP message or Body::Reader
         -> Net::QUIC::Stream->consume
 
-For buffered input, receive credit is returned immediately after the DATA is
-stored.
+For buffered input, receive credit is returned immediately after DATA is
+copied into Transaction-owned accumulation state. Partial bytes are not exposed
+through C<Uniform::HTTP::Message::body>. When the message ends, the complete
+buffer is installed in the Uniform message in one operation.
 
-For streaming input, receive credit is held until the application consumes the
-chunk.
+For streaming input, DATA stays outside the Uniform message and receive credit
+is held until the application consumes the chunk through Body::Reader.
 
 Send data follows this path:
 
@@ -325,7 +342,9 @@ values when the caller uses type-dispatch handlers.
 
 Request and response trailers are supported.
 
-They are stored separately from normal headers on the live message object.
+They are stored separately from normal headers by Uniform::HTTP 0.04.
+Incoming initial fields are frozen when their HEADERS section completes while
+trailers remain independently writable until the trailing section ends.
 
 Fields that affect framing or routing are not generated as trailers.
 Content-Length, Host, and TE are rejected on the outgoing trailer path.
@@ -343,8 +362,9 @@ The defaults remain conservative.
 
 RESET_STREAM and STOP_SENDING are passed between Net::QUIC and libnghttp3.
 
-A live message records abort state instead of being reported as complete after
-its stream has been cancelled.
+The Unblock Request and Response convenience subclasses record stream-abort
+diagnostics without changing Uniform's generic message contract. Transaction
+state remains the authoritative HTTP/3 lifecycle.
 
 Cancelled streaming body buffers are released without losing later QUIC ACK
 accounting.
@@ -412,13 +432,13 @@ therefore does not expose Server Push.
 
 ## Dependency policy
 
-Development and CI test released CPAN dependencies.
+Development and CI use released CPAN dependencies.
 
 The current baseline is:
 
 - Alien::nghttp3 0.01
 - Net::QUIC 0.04
-- Uniform::HTTP 0.02 for contract tests
+- Uniform::HTTP 0.04 as the runtime HTTP message layer
 
 Unblock::HTTP3 integration tests do not install Net::QUIC from GitHub.
 

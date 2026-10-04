@@ -26,8 +26,14 @@ QPACK. Net::QUIC supplies QUIC transport and TLS.
 Unblock::HTTP3 is designed to remain operating-system and event-loop neutral. It does not own UDP sockets, timers, TLS, or
 an event loop.
 
-Request and response objects follow the Uniform::HTTP message contract so
-HTTP/3 can use the same HTTP-facing conventions as Linux::Event::HTTP.
+Uniform::HTTP 0.04 is the runtime message layer for Unblock::HTTP3.
+
+C<Unblock::HTTP3::Request> and C<Unblock::HTTP3::Response> are thin subclasses
+of the canonical Uniform request and response classes. A plain
+C<Uniform::HTTP::Request> can also be submitted directly. Uniform owns common
+HTTP semantics such as headers, trailers, buffered bodies, request routing
+metadata, Extended CONNECT protocol metadata, fidelity, mutability, and
+completeness. Unblock owns HTTP/3 transport and stream state.
 
 ## Installation
 
@@ -87,7 +93,15 @@ different `transport->{max_bidi_streams}` value, pass the same value as
 This keeps libnghttp3's request-ID validation synchronized with QUIC; Net::QUIC
 still owns the actual stream limit and MAX_STREAMS transport behavior.
 
-A client request returns a Transaction:
+A client request returns a Transaction. The request may be a plain
+C<Uniform::HTTP::Request>:
+
+    my $request = Uniform::HTTP::Request->new(
+        method    => 'GET',
+        target    => '/',
+        scheme    => 'https',
+        authority => 'example.com',
+    );
 
     my $tx = $h3->request($request);
 
@@ -254,7 +268,7 @@ The dependency baseline is made from released CPAN modules:
 
     Alien::nghttp3 0.01
     Net::QUIC      0.04
-    Uniform::HTTP  0.02
+    Uniform::HTTP  0.04
 
 CI installs these modules from CPAN.
 

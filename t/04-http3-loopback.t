@@ -15,6 +15,7 @@ use Unblock::HTTP3::Request;
 use Unblock::HTTP3::Response;
 use Net::QUIC;
 use Net::QUIC::Driver;
+use Uniform::HTTP::Request;
 
 is($Net::QUIC::VERSION, '0.04', 'vertical slice uses CPAN Net::QUIC 0.04');
 
@@ -1189,6 +1190,47 @@ ok(
     }),
     'all multiplexed Transactions finish cleanly',
 );
+
+my $uniform_request = Uniform::HTTP::Request->new(
+    method    => 'GET',
+    target    => '/uniform-direct',
+    scheme    => 'https',
+    authority => 'localhost',
+);
+
+my $uniform_client_tx = $client_h3->request($uniform_request);
+isa_ok($uniform_client_tx, ['Unblock::HTTP3::Transaction']);
+is(refaddr($uniform_client_tx->request), refaddr($uniform_request),
+    'client Transaction retains the submitted Uniform Request directly');
+ok(!$uniform_request->is_mutable,
+    'submitted Uniform Request is frozen after HTTP/3 takes its field snapshot');
+
+my $uniform_server_tx;
+
+ok(
+    run_until(sub {
+        $uniform_server_tx ||= $server_h3->next_transaction;
+        return defined $uniform_server_tx;
+    }),
+    'server receives a request submitted as a plain Uniform object',
+);
+
+isa_ok($uniform_server_tx->request, ['Uniform::HTTP::Request']);
+is($uniform_server_tx->request->target, '/uniform-direct',
+    'plain Uniform request semantics survive the HTTP/3 wire path');
+
+$uniform_server_tx->response->status(204);
+$uniform_server_tx->send_response;
+
+ok(
+    run_until(sub {
+        return $uniform_client_tx->is_complete
+            && $uniform_server_tx->is_complete;
+    }),
+    'plain Uniform request completes a real HTTP/3 exchange',
+);
+is($uniform_client_tx->response->status, 204,
+    'plain Uniform request receives its HTTP/3 response');
 
 my $unnegotiated_extended = Unblock::HTTP3::Request->new(
     method    => 'CONNECT',

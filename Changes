@@ -6,8 +6,15 @@ Revision history for Unblock-HTTP3
     - Use Alien::nghttp3 0.01 for libnghttp3.
     - Add native client and server libnghttp3 connection state.
     - Add the HTTP/3 control and QPACK stream bridge.
-    - Add Unblock::HTTP3::Request and Unblock::HTTP3::Response with the
-      Uniform::HTTP message contract.
+    - Use Uniform::HTTP 0.04 as the runtime HTTP message layer.
+    - Make Unblock::HTTP3::Request and Unblock::HTTP3::Response thin subclasses
+      of the canonical Uniform request and response classes.
+    - Accept plain Uniform::HTTP::Request objects directly for client requests.
+    - Use Uniform's Extended CONNECT protocol metadata, ordered trailers,
+      section mutability, fidelity, and completeness APIs directly.
+    - Move streaming-body and buffered receive progress into Transaction so a
+      Uniform body is exposed only when the complete buffered body is known.
+    - Remove the duplicate Unblock::HTTP3::_Message implementation.
     - Add Unblock::HTTP3::Transaction for multiplexed request/response state.
     - Add real request and response exchange over UDP, QUIC, and TLS.
     - Add buffered request and response bodies.
