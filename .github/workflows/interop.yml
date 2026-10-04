@@ -1,14 +1,15 @@
-name: public-http3-interop
+name: HTTP/3 interoperability
 
 on:
   workflow_dispatch:
   push:
     paths:
       - "xt/interop-public.t"
+      - "xt/interop-external-client.t"
       - ".github/workflows/interop.yml"
 
 jobs:
-  interop:
+  public-servers:
     name: Public HTTP/3 servers
     runs-on: ubuntu-24.04
 
@@ -38,3 +39,47 @@ jobs:
           UNBLOCK_HTTP3_PUBLIC_INTEROP: "1"
         run: |
           prove -lv -Iblib/lib -Iblib/arch xt/interop-public.t
+
+  external-client:
+    name: quic-go client to Unblock server
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: "5.44"
+          enable-modules-cache: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.x"
+          cache: false
+
+      - name: Install released CPAN dependencies
+        run: |
+          cpanm --notest 'Alien::nghttp3@0.01'
+          cpanm --notest 'Net::QUIC@0.04'
+          cpanm --notest 'Uniform::HTTP@0.04'
+          cpanm --notest --installdeps .
+
+      - name: Build Unblock::HTTP3
+        run: |
+          perl Makefile.PL
+          perl -MConfig -e 'system($Config{make}) == 0 or exit 1'
+
+      - name: Build independent quic-go HTTP/3 client
+        run: |
+          mkdir -p "$RUNNER_TEMP/quic-go-bin"
+          GOBIN="$RUNNER_TEMP/quic-go-bin" \
+            go install github.com/quic-go/quic-go/example/client@v0.63.0
+          test -x "$RUNNER_TEMP/quic-go-bin/client"
+
+      - name: Run independent-client interoperability suite
+        env:
+          UNBLOCK_HTTP3_EXTERNAL_CLIENT: ${{ runner.temp }}/quic-go-bin/client
+        run: |
+          prove -lv -Iblib/lib -Iblib/arch xt/interop-external-client.t
