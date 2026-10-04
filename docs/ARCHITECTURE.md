@@ -212,8 +212,7 @@ Buffered request and response bodies are supported.
 Incremental outgoing request and response bodies are supported through
 Unblock::HTTP3::Body::Stream.
 
-The producer follows the same basic backpressure convention as
-Linux::Event::HTTP:
+Outgoing streaming bodies use explicit backpressure:
 
     my $can_continue = $body->write($bytes);
 
