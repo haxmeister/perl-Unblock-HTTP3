@@ -4641,7 +4641,11 @@ Starts HTTP/3 processing and creates the required control and QPACK streams.
 
 Normally QUIC is already ready. A returning client with remembered peer
 SETTINGS may start while QUIC early data is pending. A server with remembered
-local SETTINGS may start early to parse accepted 0-RTT requests.
+local SETTINGS may start early and parse 0-RTT request bytes internally.
+
+Server 0-RTT Transactions are not returned by C<next_transaction> and the
+C<datagram_request> application callback is not run until the QUIC handshake
+has completed and the early data has not been rejected.
 
 Returns the Connection.
 
@@ -4649,8 +4653,8 @@ Returns the Connection.
 
     my $tx = $h3->request($request);
 
-Client only. Submits a L<Uniform::HTTP::Request> or
-L<Uniform::HTTP::Request> and returns a L<Unblock::HTTP3::Transaction>.
+Client only. Submits a canonical L<Uniform::HTTP::Request> and returns a
+L<Unblock::HTTP3::Transaction>.
 
 Useful per-request options are:
 
@@ -4673,7 +4677,9 @@ automatically if QUIC rejects it.
 
 Returns the next ready Transaction, or undef when none is queued.
 
-On a server this is a newly received request.
+On a server this is a newly received request. A request received in 0-RTT is
+withheld until the QUIC handshake completes and the early data has not been
+rejected.
 
 On a client this is an existing Transaction whose final response headers have
 arrived.
