@@ -14,7 +14,7 @@ use Unblock::HTTP3::_Native ();
 use Unblock::HTTP3::Transaction ();
 use Net::QUIC::Connection ();
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 my $H3_DATAGRAM_ERROR = 0x33;
 my $H3_CLOSED_CRITICAL_STREAM = 0x0104;
