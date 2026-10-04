@@ -3,26 +3,22 @@
 The normal test suite is deterministic and self-contained. It uses real UDP,
 TLS, QUIC, and HTTP/3, but both endpoints are controlled by this project.
 
-The optional interoperability suite connects the Unblock::HTTP3 client to
-independent public HTTP/3 implementations.
+The optional interoperability workflow tests Unblock::HTTP3 against independent
+HTTP/3 implementations in both directions.
 
-The default targets are:
+## Unblock client to independent servers
+
+The public-server suite connects the Unblock::HTTP3 client to:
 
 - Cloudflare on www.cloudflare.com:443 - required
 - LiteSpeed on litespeedtech.com:443 - required
 - Google on www.google.com:443 - diagnostic
 
 Each required target performs a real certificate-verified QUIC handshake with
-ALPN h3 and then receives two concurrent HTTP/3 requests. Response bodies are
-consumed through the streaming API so the test also exercises receive credit
-and large-body delivery.
+ALPN h3 and receives two concurrent HTTP/3 requests. Response bodies are
+consumed through the streaming API.
 
-The release-preparation run completed both requests against Cloudflare and
-LiteSpeed. The Google endpoint is diagnostic because GitHub-hosted runners have
-intermittently failed to establish QUIC to it even while independent HTTP/3
-checkers report the endpoint as available.
-
-Run the suite with:
+Run it with:
 
     UNBLOCK_HTTP3_PUBLIC_INTEROP=1 prove -lv xt/interop-public.t
 
@@ -32,13 +28,36 @@ To choose explicit required targets:
     UNBLOCK_HTTP3_INTEROP_TARGETS=example.com:443,other.example:4433 \
     prove -lv xt/interop-public.t
 
-Public endpoints can be unavailable, rate limited, reconfigured, or blocked by
-the local network. For that reason this suite is not part of make test and is
-not allowed to make CPAN installation tests flaky.
+Google remains diagnostic because GitHub-hosted runners have intermittently
+failed to establish QUIC to it even while the other independent servers remain
+reachable.
 
-The GitHub public-http3-interop workflow can run the suite manually. It also
-runs when the interoperability test or its workflow definition changes.
+## Independent client to Unblock server
 
-A later interoperability expansion can test the opposite direction with an
-independent external HTTP/3 client driving an Unblock::HTTP3 server. That work
-is tracked in MISSING_FEATURES.md.
+The opposite direction uses the independent quic-go HTTP/3 implementation.
+
+CI pins quic-go v0.63.0, starts a real Unblock::HTTP3 server on a loopback UDP
+socket, and lets the quic-go client connect over TLS and QUIC with ALPN h3. The
+client sends a GET request, receives a 200 response, consumes the response
+body, and exits successfully.
+
+The loopback certificate is self-signed, so the external client disables
+certificate verification for this test. The TLS and QUIC handshake still occur;
+the public-server suite separately exercises normal certificate verification.
+
+Run the test locally by pointing it at a compatible quic-go example client:
+
+    UNBLOCK_HTTP3_EXTERNAL_CLIENT=/path/to/client \
+    prove -lv xt/interop-external-client.t
+
+## Why these tests stay outside make test
+
+External endpoints can be unavailable, rate limited, reconfigured, or blocked
+by the local network. Independent client toolchains also add dependencies that
+normal CPAN installation should not require.
+
+For those reasons interoperability tests live under xt and do not make CPAN
+installation tests flaky.
+
+The GitHub interoperability workflow can run the suites manually and also runs
+when the interoperability tests or workflow definition change.

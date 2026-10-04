@@ -3,7 +3,7 @@
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP3.svg)](https://metacpan.org/dist/Unblock-HTTP3)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP3.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP3)
 [![CI](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml)
-[![Public HTTP/3 interop](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/interop.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/interop.yml)
+[![HTTP/3 interop](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/interop.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/interop.yml)
 [![License](https://img.shields.io/cpan/l/Unblock-HTTP3.svg)](https://github.com/haxmeister/perl-Unblock-HTTP3/blob/main/LICENSE)
 [![Perl](https://img.shields.io/badge/perl-5.20%2B-blue.svg)](https://www.perl.org/)
 [![nghttp3](https://img.shields.io/badge/nghttp3-1.18.0-blue.svg)](https://github.com/ngtcp2/nghttp3)
@@ -391,7 +391,9 @@ The normal test suite uses real kernel UDP sockets, TLS, QUIC, and HTTP/3.
 CI tests released CPAN dependencies on Perl 5.20, 5.28, 5.36, and 5.44 and
 also validates the built distribution.
 
-Public interoperability tests talk to independent HTTP/3 servers but stay
+Interoperability CI covers both directions: the Unblock::HTTP3 client talks to
+independent public HTTP/3 servers, and a pinned quic-go client drives an
+Unblock::HTTP3 server over real loopback UDP/TLS/QUIC/HTTP/3. These tests stay
 outside normal CPAN installation tests.
 
 ## More documentation

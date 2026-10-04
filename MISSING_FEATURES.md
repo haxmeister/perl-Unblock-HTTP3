@@ -32,15 +32,20 @@ appropriate API.
 
 ## Interoperability expansion
 
-The public interoperability suite currently proves the Unblock::HTTP3 client
-against independent Cloudflare and LiteSpeed HTTP/3 servers. Google is retained
-as a diagnostic target because GitHub-hosted runners have intermittently been
-unable to establish QUIC to it.
+The interoperability suite now proves both directions:
+
+- the Unblock::HTTP3 client against independent Cloudflare and LiteSpeed
+  HTTP/3 servers
+- an independent quic-go v0.63.0 client driving an Unblock::HTTP3 server over
+  real loopback UDP/TLS/QUIC/HTTP/3
+
+Google is retained as a diagnostic public target because GitHub-hosted runners
+have intermittently been unable to establish QUIC to it.
 
 Useful later additions include:
 
-- an independent external HTTP/3 client driving an Unblock::HTTP3 server
 - more independently implemented public server targets
+- additional independent client implementations
 - scheduled interoperability runs that can surface ecosystem regressions
 
 These should remain outside the normal CPAN test path because public network
