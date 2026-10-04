@@ -9,324 +9,377 @@
 [![nghttp3](https://img.shields.io/badge/nghttp3-1.18.0-blue.svg)](https://github.com/ngtcp2/nghttp3)
 [![HTTP/3](https://img.shields.io/badge/HTTP%2F3-RFC%209114-blue.svg)](https://www.rfc-editor.org/rfc/rfc9114)
 
-Unblock::HTTP3 is an HTTP/3 engine for Perl.
+Unblock::HTTP3 is a non-blocking HTTP/3 protocol engine for Perl.
 
-It sits above Net::QUIC and below higher-level HTTP libraries.
+HTTP/3 is HTTP carried over QUIC. Unblock::HTTP3 handles the HTTP/3 layer while
+Net::QUIC handles QUIC and TLS.
 
-    application or HTTP library
-            |
-        Unblock::HTTP3
-            |
-        Net::QUIC
-            |
-            UDP
+```text
+application or HTTP library
+        |
+  Uniform::HTTP messages
+        |
+   Unblock::HTTP3
+        |
+      Net::QUIC
+        |
+        UDP
+```
 
-Unblock::HTTP3 uses libnghttp3 through Alien::nghttp3 for HTTP/3 framing and
-QPACK. Net::QUIC supplies QUIC transport and TLS.
+Unblock::HTTP3 does not own a UDP socket, timer, TLS configuration, or event
+loop. Those stay below Net::QUIC, so the HTTP/3 engine can be used with
+different operating systems and event loops.
 
-Unblock::HTTP3 is designed to remain operating-system and event-loop neutral. It does not own UDP sockets, timers, TLS, or
-an event loop.
-
-Uniform::HTTP 0.04 is the runtime message layer for Unblock::HTTP3.
-
-`Unblock::HTTP3::Request` and `Unblock::HTTP3::Response` are thin subclasses
-of the canonical Uniform request and response classes. A plain
-`Uniform::HTTP::Request` can also be submitted directly. Uniform owns common
-HTTP semantics such as headers, trailers, buffered bodies, request routing
-metadata, Extended CONNECT protocol metadata, fidelity, mutability, and
-completeness. Unblock owns HTTP/3 transport and stream state.
+Uniform::HTTP supplies the request and response objects. Alien::nghttp3
+supplies libnghttp3 for HTTP/3 framing and QPACK.
 
 ## Installation
 
 From CPAN:
 
-    cpanm Unblock::HTTP3
+```text
+cpanm Unblock::HTTP3
+```
 
-Alien::nghttp3 supplies libnghttp3 and Net::QUIC supplies QUIC transport.
+Unblock::HTTP3 0.01 requires:
 
-## Status
+```text
+Perl            5.20+
+Alien::nghttp3  0.01+
+Net::QUIC       0.04+
+Uniform::HTTP   0.04+
+```
 
-The core HTTP/3 path is working.
+## Start here
 
-Unblock::HTTP3 supports:
+Most code works with three things:
 
-- establish HTTP/3 over a real Net::QUIC connection
-- create the required control and QPACK streams
-- send and receive requests and responses
-- keep multiplexed responses paired with the correct request
-- send and receive 1xx informational responses
-- use buffered request and response bodies
-- stream outgoing request and response bodies with backpressure
-- stream incoming request and response bodies without buffering them
-- send and receive trailers
-- validate HTTP/3 field rules, routing fields, and Content-Length
-- enforce bodyless response rules
-- support basic and generic Extended CONNECT tunnels
-- frame, parse, send, and receive generic RFC 9297 Capsules
-- negotiate, route, send, and receive RFC 9297 HTTP Datagrams
-- retain and validate HTTP/3 SETTINGS for safe 0-RTT requests and Datagrams
-- cancel requests and handle RESET_STREAM and STOP_SENDING
-- apply bounded output and receive buffering
-- limit decoded field sections and message bodies
-- honor the peer's SETTINGS_MAX_FIELD_SECTION_SIZE before sending fields
-- advertise, inspect, and validate generic HTTP/3 extension SETTINGS
-- open and dispatch generic HTTP/3 extension unidirectional streams
-- set and update RFC 9218 request priorities
-- configure QPACK table and blocked-stream limits
-- begin graceful HTTP/3 shutdown
-- clean up completed stream and native body state
-- close QUIC cleanly when libnghttp3 reports a fatal parser error
+- `Unblock::HTTP3::Connection` - one HTTP/3 connection
+- `Unblock::HTTP3::Transaction` - one request and its response
+- `Uniform::HTTP::Request` and `Uniform::HTTP::Response` - HTTP messages
 
-The real integration tests use kernel UDP sockets and a real QUIC/TLS
-handshake. A separate public interoperability suite also talks directly to
-independent HTTP/3 servers operated by Cloudflare and LiteSpeed.
+`Unblock::HTTP3::Request` and `Unblock::HTTP3::Response` are optional thin
+subclasses with a few HTTP/3-specific helpers.
 
-## Main objects
+An HTTP/3 Connection wraps an existing `Net::QUIC::Connection`:
 
-One HTTP/3 connection wraps one Net::QUIC::Connection:
+```perl
+use Unblock::HTTP3::Connection;
 
-    my $h3 = Unblock::HTTP3::Connection->client(
-        quic => $quic,
-    );
+my $h3 = Unblock::HTTP3::Connection->client(
+    quic => $quic,
+);
 
-On servers, Unblock::HTTP3 mirrors Net::QUIC 0.04's default of 100 initial peer
-bidirectional streams into libnghttp3. If the QUIC server was configured with a
-different `transport->{max_bidi_streams}` value, pass the same value as
-`quic_max_bidi_streams` when constructing the HTTP/3 server connection.
-This keeps libnghttp3's request-ID validation synchronized with QUIC; Net::QUIC
-still owns the actual stream limit and MAX_STREAMS transport behavior.
+$h3->start;
+```
 
-A client request returns a Transaction. The request may be a plain
-`Uniform::HTTP::Request`:
+Your event-loop adapter continues to drive Net::QUIC. Unblock::HTTP3 never
+blocks waiting for network activity.
 
-    my $request = Uniform::HTTP::Request->new(
-        method    => 'GET',
-        target    => '/',
-        scheme    => 'https',
-        authority => 'example.com',
-    );
+## Sending a request
 
-    my $tx = $h3->request($request);
+A client can submit a normal `Uniform::HTTP::Request`:
 
-A server receives Transactions with:
+```perl
+use Uniform::HTTP::Request;
 
-    my $tx = $h3->next_transaction;
+my $request = Uniform::HTTP::Request->new(
+    method    => 'GET',
+    target    => '/',
+    scheme    => 'https',
+    authority => 'example.com',
+);
 
-The Transaction owns the request, response, body streams, cancellation state,
-and informational responses for one HTTP/3 request stream.
+my $tx = $h3->request($request);
+```
 
-## Request priority
+When the final response headers arrive, the Transaction becomes available from
+the Connection:
 
-RFC 9218 priority is available on Request and Transaction objects.
+```perl
+while (my $ready = $h3->next_transaction) {
+    my $response = $ready->response;
 
-Set the initial request priority with:
+    print $response->status, "\n";
+    print $response->body if $response->has_buffered_body;
+}
+```
 
-    $request->priority(
-        urgency     => 1,
-        incremental => 1,
-    );
+Many Transactions can be active at once. Each Transaction keeps its own request
+and response paired even when responses arrive out of order.
 
-Urgency ranges from 0 through 7, where 0 is most urgent.
+## Receiving a request
 
-After the request is active, use:
+A server receives new requests as Transactions:
 
-    $tx->priority(
-        urgency     => 0,
-        incremental => 0,
-    );
+```perl
+while (my $tx = $h3->next_transaction) {
+    my $request  = $tx->request;
+    my $response = $tx->response;
 
-A client Transaction sends PRIORITY_UPDATE. A server Transaction can inspect
-the effective client priority or override it for local response scheduling.
+    $response->status(200);
+    $response->header('Content-Type', 'text/plain');
+    $response->body("hello\n");
 
-## Body handling
+    $tx->send_response;
+}
+```
+
+The server-side Response is mutable until it is sent.
+
+## Bodies
 
 Buffered bodies are the default.
 
-For an outgoing streaming body, use the Transaction body producer. `write`
-returns false when production should pause until `on_drain` runs.
+A buffered request or response body lives on the Uniform message object:
 
-Incoming bodies can be switched to streaming mode. In streaming mode DATA is
-not copied into the Request or Response body. QUIC receive credit is returned
-only when the application consumes each chunk.
+```perl
+my $body = $response->body;
+```
+
+For large or incremental bodies, use streaming instead.
+
+A server can stream a response:
+
+```perl
+my $body = $tx->response_body(
+    on_drain  => sub { ... },
+    on_cancel => sub { ... },
+);
+
+$body->write($chunk);
+$body->complete;
+```
+
+`write()` returns false when the bytes were accepted but the producer should
+pause until `on_drain` runs.
+
+A client can receive a response without buffering the complete body:
+
+```perl
+my $tx = $h3->request(
+    $request,
+    receive_body => {
+        on_data => sub {
+            my ($reader, $chunk) = @_;
+            process($chunk);
+        },
+        on_end => sub {
+            my ($reader) = @_;
+            ...
+        },
+    },
+);
+```
+
+Streaming receive credit is returned as the application consumes data.
+
+## Trailers and informational responses
+
+Request and response trailers are supported.
+
+Uniform::HTTP keeps trailers separate from normal headers and preserves field
+order and duplicates.
+
+Servers can also send 1xx informational responses before the final response:
+
+```perl
+$tx->send_informational(
+    Unblock::HTTP3::Response->new(
+        status => 103,
+    ),
+);
+```
+
+HTTP/3 does not use status 101.
 
 ## CONNECT
 
-Basic HTTP CONNECT tunnels are supported.
-
-A basic CONNECT request uses authority form and omits scheme and path on the
-wire. After a successful 2xx response, DATA on the request stream is tunnel
-data.
+Basic CONNECT tunnels are supported.
 
 Generic Extended CONNECT is also supported. A server enables it with:
 
-    enable_extended_connect => 1
+```perl
+my $h3 = Unblock::HTTP3::Connection->server(
+    quic                    => $quic,
+    enable_extended_connect => 1,
+);
+```
 
-A client can inspect `peer_extended_connect_enabled` before sending an
-Extended CONNECT request. Set `protocol` on the Request to add the
-`:protocol` pseudo-header. The Transaction exposes the same protocol
-identifier.
+An Extended CONNECT request uses the Uniform `protocol` field.
 
-Unblock::HTTP3 does not assign meaning to protocol identifiers. Higher-level
-protocol modules or applications decide which protocols they support.
+Unblock::HTTP3 does not assign meaning to protocol names. Higher-level modules
+decide what protocols such as WebTransport, WebSocket, or MASQUE mean.
 
-RFC 9297 Capsule Protocol is available through `Transaction->capsules` on an
-Extended CONNECT Transaction. Capsules use the existing streaming body path,
-including backpressure and receive-credit handling. Capsule type semantics stay
-in the higher-level protocol.
+Extended CONNECT Transactions can also use the generic RFC 9297 Capsule
+Protocol through:
 
-CONNECT tunnel data uses streaming body objects in both directions. A rejected
-CONNECT remains an ordinary HTTP response.
+```perl
+my $capsules = $tx->capsules;
+```
 
-## HTTP message correctness
+## HTTP Datagrams
 
-Unblock::HTTP3 validates outgoing HTTP/3 fields before handing them to libnghttp3.
+RFC 9297 HTTP Datagrams are supported over Net::QUIC's QUIC DATAGRAM support.
 
-Request routing checks include:
+Enable them on the HTTP/3 connection:
 
-- Host must match :authority when both are present
-- http/https paths must be absolute, except OPTIONS *
-- URI fragments are not allowed in :path
-- http/https authority does not allow userinfo
-- CONNECT requires an explicit host and port
-- CONNECT ports must be from 1 through 65535
+```perl
+my $h3 = Unblock::HTTP3::Connection->client(
+    quic                  => $quic,
+    enable_http_datagrams => 1,
+);
+```
 
-Malformed received routing fields reject only the affected request stream with
-H3_MESSAGE_ERROR. Other multiplexed request streams remain usable.
-
-It also checks:
-
-- bodyless response rules for HEAD, 204, 205, and 304
-- Content-Length syntax and duplicate fields
-- buffered Content-Length mismatches
-- incremental Content-Length overshoot and undershoot
-- successful CONNECT responses, which must not carry Content-Length
-- Content-Length and Host are rejected in trailers
-
-libnghttp3 validates received Content-Length against received DATA.
-
-## Scope
-
-The initial release focuses on the HTTP/3 core needed for normal client,
-server, streaming, multiplexing, shutdown, and CONNECT use.
-
-Extensible HTTP/3 SETTINGS support is implemented as a small generic API so
-higher-level protocols can advertise and inspect their own SETTINGS without
-putting their semantics into Unblock::HTTP3::Connection.
-HTTP/3-reserved identifiers cannot be used for extension semantics, and
-GREASE setting identifiers are kept non-semantic as required by HTTP/3.
-
-Generic HTTP/3 extension unidirectional streams can be registered with
-`extension_stream_handler` and opened with `open_extension_stream`.
-Unblock::HTTP3 handles the stream-type prefix while the extension owns the bytes
-that follow it.
-
-Extended CONNECT is implemented generically on top of the SETTINGS support.
-
-Capsule Protocol support is implemented generically on Extended CONNECT data
-streams.
-
-HTTP Datagrams from RFC 9297 are implemented on top of Net::QUIC 0.04.
-
-Enable QUIC DATAGRAM transport when creating the Net::QUIC endpoint, then opt the
-HTTP/3 connection into SETTINGS_H3_DATAGRAM:
-
-    my $h3 = Unblock::HTTP3::Connection->client(
-        quic                  => $quic,
-        enable_http_datagrams => 1,
-    );
-
-A client marks a request as having HTTP Datagram semantics when it creates the
+A client marks a request as using HTTP Datagrams when it creates the
 Transaction:
 
-    my $tx = $h3->request(
-        $request,
-        datagrams => 1,
-    );
+```perl
+my $tx = $h3->request(
+    $request,
+    datagrams => 1,
+);
 
-Servers use the protocol-neutral `datagram_request` predicate to decide whether
-an incoming request defines HTTP Datagram semantics. The Transaction then owns
-`send_datagram`, `next_datagram`, `on_datagram`, and
+$tx->send_datagram($bytes);
+```
+
+The Transaction also provides `next_datagram`, `on_datagram`, and
 `max_datagram_payload_size`.
 
-Unblock::HTTP3 handles SETTINGS_H3_DATAGRAM, Quarter Stream IDs, bounded receive
-buffering, and H3_DATAGRAM_ERROR. Higher-level protocols still define what the
-payload bytes mean.
+The higher-level protocol still decides what the Datagram payload means.
 
-## 0-RTT and remembered HTTP/3 SETTINGS
+## Request priority
 
-Net::QUIC owns the QUIC/TLS early-data state. Unblock::HTTP3 separately owns
-the HTTP/3 SETTINGS state that controls what can safely be sent before the new
-server SETTINGS frame arrives.
+RFC 9218 priority can be set on a request:
 
-After a successful client connection has received the peer SETTINGS, save both
-opaque values from the same session:
+```perl
+my $request = Unblock::HTTP3::Request->new(
+    method    => 'GET',
+    target    => '/',
+    scheme    => 'https',
+    authority => 'example.com',
+    priority  => {
+        urgency     => 1,
+        incremental => 1,
+    },
+);
+```
 
-    my $quic_early = $quic->early_data_state;
-    my $h3_settings = $h3->peer_settings_state;
+It can also be changed on a live Transaction:
 
-A returning client gives the QUIC state back to Net::QUIC and the HTTP/3 state
-back to Unblock::HTTP3:
+```perl
+$tx->priority(
+    urgency     => 0,
+    incremental => 0,
+);
+```
 
-    my $h3 = Unblock::HTTP3::Connection->client(
-        quic                     => $quic,
-        remembered_peer_settings => $h3_settings,
-    );
+Urgency is from 0 through 7, where 0 is most urgent.
 
-    $h3->start;
+## 0-RTT
 
-A request sent before the QUIC handshake finishes must opt in explicitly:
+Net::QUIC owns QUIC/TLS early-data state. Unblock::HTTP3 owns the remembered
+HTTP/3 SETTINGS needed to decide what can safely be sent before the new server
+SETTINGS frame arrives.
 
-    my $tx = $h3->request(
-        $request,
-        early_data => 1,
-    );
+Save both values from the same successful session:
 
-0-RTT can be replayed by the network. Unblock::HTTP3 never automatically
-retries an early request. If QUIC rejects early data, the early Transaction
-becomes an error, the HTTP/3 state is rebuilt for 1-RTT, and the application
-decides whether the operation is safe to send again.
+```perl
+my $quic_state = $quic->early_data_state;
+my $h3_state   = $h3->peer_settings_state;
+```
 
-Servers that accept QUIC early data pass the HTTP/3 settings they advertised
-for the resumed session as `remembered_local_settings`. `local_settings_state`
-returns an opaque value suitable for this purpose. A server must disable or
-reject 0-RTT when it cannot determine that the remembered settings are
-compatible with its current configuration.
+On a resumed connection, give each value back to the layer that created it.
 
-The new peer SETTINGS are validated after accepted 0-RTT. Reduced limits and
-missing previously non-default settings fail with H3_SETTINGS_ERROR. QPACK's
-remembered nonzero table capacity follows RFC 9204's stricter exact-value rule.
-RFC 9297 SETTINGS_H3_DATAGRAM state is retained too, so HTTP Datagrams can be
-used in 0-RTT when both the saved HTTP/3 and QUIC transport state allow them.
+An HTTP/3 request sent before the handshake finishes must opt in explicitly:
 
-libnghttp3 1.18.0 does not implement HTTP/3 Server Push, so Unblock::HTTP3 does
-not expose Server Push.
+```perl
+my $tx = $h3->request(
+    $request,
+    early_data => 1,
+);
+```
 
-WebTransport is not a missing Unblock::HTTP3 feature. It is a higher-level
-protocol which can be built above the generic HTTP/3 extension facilities
-provided here.
+0-RTT can be replayed. Unblock::HTTP3 does not automatically retry an early
+request if QUIC rejects it.
 
-See [MISSING_FEATURES.md](MISSING_FEATURES.md) for the detailed roadmap.
+See `Unblock::HTTP3::Connection` and `docs/ARCHITECTURE.md` for the complete
+SETTINGS persistence rules.
 
-## CPAN dependency policy
+## Correctness and limits
 
-The dependency baseline is made from released CPAN modules:
+Unblock::HTTP3 validates HTTP/3 message rules before sending and while receiving.
 
-    Alien::nghttp3 0.01
-    Net::QUIC      0.04
-    Uniform::HTTP  0.04
+This includes:
 
-CI installs these modules from CPAN.
+- pseudo-header and routing rules
+- Host and `:authority`
+- Content-Length
+- trailers
+- bodyless responses
+- CONNECT rules
+- peer field-section limits
 
-Unblock::HTTP3 integration tests do not install Net::QUIC from GitHub. This keeps
-the tested stack equal to what a CPAN user can install.
+It also provides configurable limits for buffered bodies, streaming receive
+queues, field sections, QPACK, and HTTP Datagram queues.
 
-## Native dependency
+Protocol errors are kept at the narrowest correct scope when possible. A bad
+request stream does not automatically destroy unrelated multiplexed requests.
 
-Alien::nghttp3 supplies libnghttp3.
+## Extensions
 
-## Architecture
+The engine provides generic extension hooks without assigning application
+semantics to them:
 
-See docs/ARCHITECTURE.md.
+- extension SETTINGS
+- extension unidirectional streams
+- Extended CONNECT protocol names
+- Capsules
+- HTTP Datagrams
+
+This is the intended foundation for higher-level HTTP/3 protocols.
+
+## What Unblock::HTTP3 does not own
+
+Unblock::HTTP3 does not own:
+
+- UDP sockets
+- TLS
+- QUIC packet processing
+- congestion control
+- retransmission
+- QUIC connection migration
+- timers
+- event-loop scheduling
+- web-framework behavior
+
+Those responsibilities stay in Net::QUIC, the event-loop adapter, or the
+application.
+
+HTTP/3 Server Push is not exposed because the libnghttp3 version used by this
+release does not implement it.
+
+## Testing
+
+The normal test suite uses real kernel UDP sockets, TLS, QUIC, and HTTP/3.
+
+CI tests released CPAN dependencies on Perl 5.20, 5.28, 5.36, and 5.44.
+`distcheck` and `disttest` are part of the release path.
+
+A separate public interoperability suite talks to independent HTTP/3 servers
+and stays outside the normal CPAN installation tests.
+
+## More documentation
+
+- `Unblock::HTTP3::Connection` - connection setup and configuration
+- `Unblock::HTTP3::Transaction` - one request/response stream
+- `Unblock::HTTP3::Body::Stream` - outgoing streaming bodies
+- `Unblock::HTTP3::Body::Reader` - incoming streaming bodies
+- `Unblock::HTTP3::Capsule` - RFC 9297 Capsules
+- `Unblock::HTTP3::Extension::Stream` - generic extension streams
+- `docs/ARCHITECTURE.md` - protocol ownership and internal data flow
+- `docs/INTEROPERABILITY.md` - public interoperability testing
+- `MISSING_FEATURES.md` - deliberately deferred work
 
 ## License
 

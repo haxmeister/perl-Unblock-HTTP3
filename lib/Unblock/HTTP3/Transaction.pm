@@ -819,44 +819,56 @@ __END__
 
 Unblock::HTTP3::Transaction - one HTTP/3 request and response
 
+=head1 SYNOPSIS
+
+    my $tx = $h3->request($request);
+
+    my $request  = $tx->request;
+    my $response = $tx->response;
+
+    if ($tx->is_terminal) {
+        ...
+    }
+
 =head1 DESCRIPTION
 
 A Transaction represents one HTTP/3 request stream.
 
-It keeps the Request, final Response, body streams, informational responses,
-and cancellation state together. Applications do not need to match responses
-with raw QUIC stream IDs.
+It keeps the Request, final Response, streaming body objects, informational
+responses, Datagram state, priority, and lifecycle state together. Applications
+normally do not need to match responses with raw QUIC stream IDs.
 
 =head1 METHODS
+
+=head2 stream_id
+
+Returns the HTTP/3 request stream ID.
+
+=head2 request
+
+Returns the L<Uniform::HTTP::Request> associated with this Transaction.
+
+=head2 response
+
+Returns the final L<Unblock::HTTP3::Response> when one is available.
+
+On a server, the Transaction receives a mutable Response when the request is
+created.
+
+=head2 protocol
+
+Returns the Extended CONNECT protocol identifier, or undef for an ordinary
+request or basic CONNECT tunnel.
+
+=head2 is_extended_connect
+
+True when the request is Extended CONNECT.
 
 =head2 early_data
 
 True when this Transaction's request was carried in QUIC 0-RTT.
 
-On the client this records an explicit C<early_data =E<gt> 1> submission. On
-the server it records the early-data origin reported by Net::QUIC.
-
-Applications must treat early operations as replayable.
-
-=head2 stream_id
-
-Returns the HTTP/3 request stream ID used by this Transaction.
-
-Applications normally do not need to use the raw stream ID.
-
-=head2 request
-
-Returns the submitted L<Uniform::HTTP::Request>. This can be a plain Uniform
-request or the L<Unblock::HTTP3::Request> convenience subclass.
-
-=head2 protocol
-
-Returns the protocol identifier for an Extended CONNECT transaction, or
-C<undef> for an ordinary request or basic CONNECT tunnel.
-
-=head2 is_extended_connect
-
-True when the request is an Extended CONNECT request.
+0-RTT can be replayed and must be treated accordingly by the application.
 
 =head2 priority
 
@@ -867,18 +879,55 @@ True when the request is an Extended CONNECT request.
         incremental => 1,
     );
 
-Returns or changes the live RFC 9218 priority for this request stream.
+Gets or changes the live RFC 9218 priority.
 
-On a client, changing priority sends a PRIORITY_UPDATE. On a server, changing
-priority overrides the client priority for local response scheduling.
+Urgency is 0 through 7, where 0 is most urgent. Incremental is 0 or 1.
 
-Urgency is from 0 through 7, where 0 is most urgent. Incremental is 0 or 1.
+On a client, changing priority sends PRIORITY_UPDATE. On a server, it changes
+the local response scheduling priority.
 
-=head2 response
+=head2 request_body
 
-Returns the final L<Unblock::HTTP3::Response> when one is available.
+Returns the request body stream object when the Transaction is configured for
+streaming.
 
-A server Transaction receives a mutable Response when the request is created.
+On a client this is a writable L<Unblock::HTTP3::Body::Stream>.
+
+On a server this is a readable L<Unblock::HTTP3::Body::Reader>.
+
+=head2 response_body
+
+Returns the response body stream object when the Transaction is configured for
+streaming.
+
+On a server this is a writable L<Unblock::HTTP3::Body::Stream>.
+
+On a client this is a readable L<Unblock::HTTP3::Body::Reader>.
+
+=head2 send_response
+
+Server only. Sends the final buffered or bodyless Response.
+
+For a streaming response body, use C<response_body> instead.
+
+=head2 send_informational
+
+    $tx->send_informational(
+        Unblock::HTTP3::Response->new(
+            status => 103,
+        ),
+    );
+
+Server only. Sends a 1xx response before the final Response. Status 101 is not
+used by HTTP/3.
+
+=head2 next_informational
+
+Client only. Returns the next received informational Response, or undef.
+
+=head2 is_response_started
+
+True after final response headers have started sending.
 
 =head2 capsules
 
@@ -887,30 +936,25 @@ A server Transaction receives a mutable Response when the request is created.
 Creates or returns a L<Unblock::HTTP3::Capsule::Stream> for an Extended CONNECT
 Transaction.
 
-Higher-level protocols remain responsible for deciding when Capsule Protocol
+The higher-level protocol is responsible for deciding whether Capsule Protocol
 use has been negotiated.
 
 =head2 datagrams_enabled
 
-True when the higher-level HTTP extension marked this request as defining HTTP
-Datagram semantics.
+True when this Transaction has HTTP Datagram semantics.
 
 =head2 send_datagram
 
     my $accepted = $tx->send_datagram($bytes);
 
-Sends one RFC 9297 HTTP Datagram through Net::QUIC. The Quarter Stream ID is
-added automatically. A false return preserves Net::QUIC's bounded transmit
-backpressure and means the caller should decide whether to retry or drop the
-unreliable payload.
+Sends one RFC 9297 HTTP Datagram.
 
-Both endpoints must have negotiated SETTINGS_H3_DATAGRAM and the request
-stream's local send side must still be open.
+A false return means the unreliable payload was not accepted for transmission.
+The caller decides whether to retry or drop it.
 
 =head2 next_datagram
 
-Returns the next received HTTP Datagram payload for this Transaction, or
-C<undef> when none is queued.
+Returns the next queued HTTP Datagram payload, or undef.
 
 =head2 on_datagram
 
@@ -919,87 +963,57 @@ C<undef> when none is queued.
         ...
     });
 
-Installs a callback for received HTTP Datagram payloads. Existing queued
-payloads are drained to the callback.
+Installs or replaces the receive callback. Passing undef removes it.
+
+Queued Datagrams are drained to a newly installed callback.
 
 =head2 max_datagram_payload_size
 
-Returns the current maximum payload bytes this Transaction can send after the
-Quarter Stream ID overhead is removed from Net::QUIC's current path capacity.
-Returns zero when HTTP Datagrams are not currently sendable.
-
-=head2 is_response_started
-
-True after the final response header section has started sending.
-
-=head2 request_body
-
-Represents the request body.
-
-On a client it is a writable L<Unblock::HTTP3::Body::Stream> when the request was
-created with C<stream_body>.
-
-On a server it is a readable L<Unblock::HTTP3::Body::Reader> when request receive
-mode is C<stream>.
-
-=head2 response_body
-
-Represents the response body.
-
-On a server it creates or returns the writable
-L<Unblock::HTTP3::Body::Stream>.
-
-On a client it returns the readable L<Unblock::HTTP3::Body::Reader> when response
-receive mode is C<stream>.
-
-=head2 send_response
-
-Server only.
-
-Sends the Transaction's final buffered or bodyless Response.
-
-For an incremental response body, use C<response_body> instead.
-
-=head2 send_informational
-
-Server only.
-
-    $tx->send_informational(
-        Unblock::HTTP3::Response->new(
-            status => 103,
-            headers => [
-                [ link => '</style.css>; rel=preload' ],
-            ],
-        ),
-    );
-
-Sends a 1xx response before the final Response. HTTP/3 does not use status
-101.
-
-=head2 next_informational
-
-Client only.
-
-Returns the next received informational Response for this Transaction.
+Returns the current maximum HTTP Datagram payload size for this Transaction.
+Returns zero when a Datagram cannot currently be sent.
 
 =head2 cancel
 
-Cancels the request stream with C<H3_REQUEST_CANCELLED>.
+Cancels the request stream with C<H3_REQUEST_CANCELLED>. Returns the
+Transaction.
 
 =head2 state
 
-Returns C<active>, C<complete>, C<cancelled>, or C<error>.
+Returns one of:
+
+    active
+    complete
+    cancelled
+    error
 
 =head2 error
 
-Returns Transaction error text when C<state> is C<error>.
+Returns the Transaction error text when C<state> is C<error>.
 
 =head2 is_complete
 
+True when C<state> is C<complete>.
+
 =head2 is_cancelled
+
+True when C<state> is C<cancelled>.
 
 =head2 is_terminal
 
-Report Transaction lifecycle state.
+True when the Transaction is complete, cancelled, or in error.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP3::Connection>, L<Unblock::HTTP3::Request>,
+L<Unblock::HTTP3::Response>, L<Unblock::HTTP3::Body::Stream>,
+L<Unblock::HTTP3::Body::Reader>, L<Unblock::HTTP3::Capsule::Stream>
+
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
 
 =cut

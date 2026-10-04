@@ -3996,15 +3996,37 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Connection - HTTP/3 state over one Net::QUIC connection
+Unblock::HTTP3::Connection - one HTTP/3 connection over Net::QUIC
+
+=head1 SYNOPSIS
+
+    use Unblock::HTTP3::Connection;
+    use Uniform::HTTP::Request;
+
+    my $h3 = Unblock::HTTP3::Connection->client(
+        quic => $quic,
+    );
+
+    $h3->start;
+
+    my $tx = $h3->request(
+        Uniform::HTTP::Request->new(
+            method    => 'GET',
+            target    => '/',
+            scheme    => 'https',
+            authority => 'example.com',
+        ),
+    );
 
 =head1 DESCRIPTION
 
-One C<Unblock::HTTP3::Connection> wraps one C<Net::QUIC::Connection>.
+One C<Unblock::HTTP3::Connection> wraps one L<Net::QUIC::Connection>.
 
-Unblock::HTTP3 owns HTTP/3 and QPACK state. Uniform::HTTP 0.04 supplies common
-HTTP message semantics. Net::QUIC owns QUIC and TLS. The UDP socket, timer, and
-event loop remain outside these modules.
+Unblock::HTTP3 owns HTTP/3 connection state, control streams, QPACK integration,
+request streams, HTTP/3 errors, and HTTP/3 extensions. Net::QUIC owns QUIC and
+TLS. The event-loop adapter owns the UDP socket and timer.
+
+L<Uniform::HTTP> supplies common request and response semantics.
 
 =head1 CONSTRUCTORS
 
@@ -4024,291 +4046,149 @@ Creates client-side HTTP/3 state.
 
 Creates server-side HTTP/3 state.
 
-Useful options include:
+=head1 OPTIONS
 
-    send_buffer_limit
-    max_field_section_size
-    max_buffered_body_bytes
-    max_streaming_body_bytes
-    receive_body
-    enable_extended_connect
-    enable_http_datagrams
-    datagram_request
-    max_buffered_datagram_bytes
-    max_buffered_datagrams
-    extension_settings
-    on_extension_settings
-    remembered_peer_settings
-    remembered_local_settings
+C<quic> is required and must be a L<Net::QUIC::Connection>.
 
-C<enable_extended_connect> is a server-only boolean. When enabled, the
-server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL and accepts the generic
-C<:protocol> pseudo-header used by Extended CONNECT.
+Common options are:
 
-C<enable_http_datagrams> advertises SETTINGS_H3_DATAGRAM. The wrapped
-Net::QUIC connection must have been created with QUIC DATAGRAM receive support.
+=over 4
 
-C<datagram_request> is a server-only callback used to decide whether an incoming
-request defines HTTP Datagram semantics. It receives the Connection and Request
-and returns true to enable datagrams on the new Transaction. This keeps
-WebTransport, MASQUE, and other protocol names outside Unblock::HTTP3.
+=item C<send_buffer_limit>
 
-C<max_buffered_datagram_bytes> and C<max_buffered_datagrams> bound the
-Transaction pull-style receive queues. Excess unreliable datagrams are dropped
-and counted by C<datagram_receive_drops>.
+Maximum buffered HTTP/3 output bytes. The default is 4 MiB.
 
-C<extension_settings> is a hash reference of additional HTTP/3 SETTINGS
-identifier/value pairs. SETTINGS reserved for dedicated Unblock::HTTP3/libnghttp3
-support, HTTP/3-reserved identifiers, and GREASE identifiers cannot be
-assigned extension semantics here.
+=item C<max_field_section_size>
 
-C<on_extension_settings> is called once after the peer SETTINGS frame is
-accepted. It receives the Connection and a hash reference containing peer
-extension SETTINGS. The callback may C<die> to reject invalid extension
-settings. Unblock::HTTP3 then closes the connection with C<H3_SETTINGS_ERROR>.
+Maximum decoded header or trailer field-section size. The default is 65536
+bytes.
 
-C<remembered_peer_settings> is client-only. It accepts the opaque value returned
-by C<peer_settings_state> on the previous HTTP/3 connection and supplies the
-initial server SETTINGS view required for 0-RTT.
+=item C<max_buffered_body_bytes>
 
-C<remembered_local_settings> is server-only. It accepts the opaque previously
-advertised state returned by C<local_settings_state>. A server that accepts
-QUIC early data uses this to verify that its current HTTP/3 configuration is
-compatible with what the client could have remembered.
+Maximum body size retained in a buffered Request or Response. The default is
+64 MiB.
 
-C<quic_max_bidi_streams> is a server-side synchronization hint for
-libnghttp3. It defaults to 100, matching Net::QUIC 0.04. If the QUIC server was
-created with a different C<transport-E<gt>{max_bidi_streams}> value, pass the
-same value here.
+=item C<max_streaming_body_bytes>
 
-C<receive_body> is C<buffered> by default. Use C<stream> when incoming DATA
-should be consumed through L<Unblock::HTTP3::Body::Reader> instead of copied into
-the Request or Response body.
+Maximum queued incoming streaming body bytes. The default is 4 MiB.
+
+=item C<receive_body>
+
+C<buffered> by default. Use C<stream> to receive bodies through
+L<Unblock::HTTP3::Body::Reader>.
+
+=item C<qpack_max_table_capacity>
+
+Local QPACK dynamic-table capacity. The default is 4096.
+
+=item C<qpack_blocked_streams>
+
+Local QPACK blocked-stream limit. The default is 100.
+
+=item C<enable_extended_connect>
+
+Server only. Advertises Extended CONNECT support.
+
+=item C<enable_http_datagrams>
+
+Advertises RFC 9297 HTTP Datagram support. The Net::QUIC connection must also
+have QUIC DATAGRAM receive support.
+
+=item C<datagram_request>
+
+Server-only callback used to decide whether an incoming request uses HTTP
+Datagrams. It receives the Connection and Request.
+
+=item C<max_buffered_datagram_bytes>
+
+Maximum total bytes retained in Transaction Datagram queues. The default is
+1 MiB.
+
+=item C<max_buffered_datagrams>
+
+Maximum number of retained HTTP Datagrams. The default is 1024.
+
+=item C<quic_max_bidi_streams>
+
+Server-only synchronization value for libnghttp3 request stream validation.
+The default is 100, matching Net::QUIC 0.04. If the QUIC server uses a
+different C<transport-E<gt>{max_bidi_streams}> value, pass the same value here.
+
+=item C<extension_settings>
+
+Hash reference of additional HTTP/3 SETTINGS identifiers and values.
+
+=item C<on_extension_settings>
+
+Callback run after peer extension SETTINGS are accepted. It receives the
+Connection and a hash reference of peer extension SETTINGS. Dying from the
+callback rejects the settings with C<H3_SETTINGS_ERROR>.
+
+=item C<extension_stream_handlers>
+
+Hash reference mapping extension unidirectional stream types to callbacks.
+
+=item C<remembered_peer_settings>
+
+Client-only opaque value previously returned by C<peer_settings_state>. Used
+for HTTP/3 0-RTT.
+
+=item C<remembered_local_settings>
+
+Server-only opaque value previously returned by C<local_settings_state>. Used
+to validate HTTP/3 settings when accepting 0-RTT.
+
+=back
 
 =head1 METHODS
 
-=head2 http_datagrams_enabled
-
-True when this endpoint advertises SETTINGS_H3_DATAGRAM.
-
-=head2 peer_http_datagrams_enabled
-
-True after the peer advertises SETTINGS_H3_DATAGRAM.
-
-=head2 can_send_http_datagrams
-
-True when both HTTP/3 endpoints negotiated datagrams and Net::QUIC reports that
-the peer accepts QUIC DATAGRAM frames.
-
-=head2 can_receive_http_datagrams
-
-True when both HTTP/3 endpoints negotiated datagrams and local QUIC DATAGRAM
-receive support is active.
-
-=head2 datagram_receive_drops
-
-Returns the number of HTTP Datagram payloads dropped because the bounded
-Transaction receive queues were full.
-
 =head2 start
 
-Starts HTTP/3.
+Starts HTTP/3 processing and creates the required control and QPACK streams.
 
-Normally QUIC is already ready. A client with C<remembered_peer_settings> may
-also start while Net::QUIC reports pending 0-RTT. A server with
-C<remembered_local_settings> may start early so it can parse accepted 0-RTT
-request streams.
+Normally QUIC is already ready. A returning client with remembered peer
+SETTINGS may start while QUIC early data is pending. A server with remembered
+local SETTINGS may start early to parse accepted 0-RTT requests.
 
-The client creates its control and QPACK streams in early data when necessary.
-A server receiving 0-RTT waits until 1-RTT is ready before creating its own
-outgoing control and QPACK streams.
-
-=head2 nghttp3_version
-
-Returns the runtime libnghttp3 version string.
-
-=head2 started
-
-True after C<start> has successfully initialized the HTTP/3 control and QPACK
-streams.
-
-=head2 extended_connect_enabled
-
-True when this server connection advertises Extended CONNECT support.
-
-=head2 peer_extended_connect_enabled
-
-True when the peer advertised SETTINGS_ENABLE_CONNECT_PROTOCOL with value 1.
-
-=head2 early_data_status
-
-Returns the underlying Net::QUIC early-data status: C<none>, C<pending>,
-C<accepted>, or C<rejected>.
-
-Checking this method also synchronizes any required HTTP/3 rollback after QUIC
-rejects early data.
-
-=head2 local_settings_state
-
-Returns an opaque byte string containing this endpoint's advertised HTTP/3
-SETTINGS state. Store it without modifying it.
-
-Servers can associate this state with the period in which matching QUIC session
-tickets are valid and supply it later as C<remembered_local_settings>.
-
-=head2 peer_settings_state
-
-Returns an opaque byte string containing the current peer HTTP/3 SETTINGS after
-C<peer_settings_received> becomes true. Before that it returns C<undef>.
-
-A client should save this alongside Net::QUIC's C<early_data_state> from the
-same connection when it wants to attempt HTTP/3 0-RTT later.
-
-=head2 using_remembered_peer_settings
-
-True while a returning client is still using its remembered server SETTINGS as
-the initial 0-RTT view and the new SETTINGS frame has not yet arrived.
-
-=head2 extension_settings
-
-Returns a copy of the local extension SETTINGS that will be advertised.
-
-=head2 extension_setting
-
-    $h3->extension_setting(0x1234, 1);
-
-Sets one local extension SETTING before C<start>. With only the identifier,
-returns the configured value.
-
-=head2 peer_extension_settings
-
-Returns a copy of the extension SETTINGS received from the peer.
-
-=head2 peer_extension_setting
-
-    my $value = $h3->peer_extension_setting(0x1234);
-
-Returns one peer extension SETTING, or C<undef> if it was not advertised.
-
-=head2 peer_settings_received
-
-True after the peer SETTINGS frame has been accepted.
+Returns the Connection.
 
 =head2 request
 
-A client may pass C<datagrams =E<gt> 1> to mark the new request as defining
-HTTP Datagram semantics. This does not assign meaning to the datagram payload;
-the higher-level HTTP extension owns those bytes.
-
-Client only.
-
     my $tx = $h3->request($request);
 
-Returns a L<Unblock::HTTP3::Transaction>.
+Client only. Submits a L<Uniform::HTTP::Request> or
+L<Unblock::HTTP3::Request> and returns a L<Unblock::HTTP3::Transaction>.
 
-A request sent before the QUIC handshake completes must explicitly use
-C<early_data =E<gt> 1>. Early data is replayable. Unblock::HTTP3 does not retry
-the request automatically if QUIC rejects it; the early Transaction becomes an
-error and the application decides whether to submit the operation again.
+Useful per-request options are:
 
-C<$request> may be a plain L<Uniform::HTTP::Request> or an
-L<Unblock::HTTP3::Request>. Unblock::HTTP3 validates the Uniform request for
-HTTP/3 when it is submitted and freezes its represented message values after
-the wire snapshot has been accepted.
+    stream_body
+    receive_body
+    datagrams
+    early_data
 
-For an outgoing streaming request body:
+C<stream_body> configures an outgoing streaming request body.
 
-    my $tx = $h3->request(
-        $request,
-        stream_body => {
-            on_drain  => sub { ... },
-            on_cancel => sub { ... },
-        },
-    );
+C<receive_body> configures streaming response receipt.
 
-For a streaming response body:
+C<datagrams =E<gt> 1> marks the request as using HTTP Datagram semantics.
 
-    my $tx = $h3->request(
-        $request,
-        receive_body => {
-            on_data => sub {
-                my ($reader, $chunk) = @_;
-                ...
-            },
-            on_end => sub { ... },
-        },
-    );
+C<early_data =E<gt> 1> explicitly permits submission before the QUIC handshake
+finishes. 0-RTT is replayable. Unblock::HTTP3 does not retry an early request
+automatically if QUIC rejects it.
 
 =head2 next_transaction
 
-Returns the next newly available Transaction.
+Returns the next ready Transaction, or undef when none is queued.
 
-On a server this means a new request has arrived.
+On a server this is a newly received request.
 
-On a client this means the final response headers for an existing Transaction
-have arrived.
+On a client this is an existing Transaction whose final response headers have
+arrived.
 
 =head2 next_informational
 
-Client only.
-
-Returns a Transaction which has received a new 1xx response. Retrieve the
-response with C<< $tx->next_informational >>.
-
-=head2 extension_stream_handler
-
-    $h3->extension_stream_handler(
-        0x54,
-        sub {
-            my ($connection, $stream) = @_;
-            ...
-        },
-    );
-
-Registers one HTTP/3 extension unidirectional stream type before C<start>.
-
-Core HTTP/3 stream types and reserved GREASE stream types cannot be claimed by
-extensions.
-
-=head2 open_extension_stream
-
-    my $stream = $h3->open_extension_stream(0x54);
-
-Opens an outgoing HTTP/3 extension unidirectional stream and writes its stream
-type prefix.
-
-Returns a L<Unblock::HTTP3::Extension::Stream>, or C<undef> when QUIC
-unidirectional stream credit is exhausted.
-
-=head2 receive_body_mode
-
-Gets or changes the default receive mode for future incoming messages.
-
-    $h3->receive_body_mode('stream');
-
-Changing this does not alter Transactions which already exist.
-
-=head2 max_field_section_size
-
-Returns the configured decoded header or trailer field-section limit.
-
-=head2 max_buffered_body_bytes
-
-Returns the configured limit for an incoming body that is buffered into a
-Request or Response.
-
-=head2 max_streaming_body_bytes
-
-Returns the configured limit for queued incoming streaming body bytes that the
-application has not consumed yet.
-
-=head2 qpack_max_table_capacity
-
-Returns the configured local QPACK dynamic-table capacity.
-
-=head2 qpack_blocked_streams
-
-Returns the configured QPACK blocked-stream limit.
+Client only. Returns a Transaction which has received a new 1xx response.
+Retrieve the response with C<< $tx->next_informational >>.
 
 =head2 role
 
@@ -4316,18 +4196,179 @@ Returns C<client> or C<server>.
 
 =head2 quic
 
-Returns the underlying C<Net::QUIC::Connection>.
+Returns the wrapped L<Net::QUIC::Connection>.
+
+=head2 nghttp3_version
+
+Returns the runtime libnghttp3 version string.
+
+=head2 started
+
+True after C<start> succeeds.
+
+=head2 failed
+
+True after a fatal local HTTP/3 error.
+
+=head2 error
+
+Returns the saved error text after C<failed> becomes true.
+
+=head2 error_code
+
+Returns the HTTP/3 application error code associated with C<error>, or undef
+when no fatal HTTP/3 error has been recorded.
+
+=head2 receive_body_mode
+
+    my $mode = $h3->receive_body_mode;
+    $h3->receive_body_mode('stream');
+
+Gets or changes the default receive mode for future Transactions. Valid values
+are C<buffered> and C<stream>.
+
+=head2 max_field_section_size
+
+Returns the configured field-section limit.
+
+=head2 max_buffered_body_bytes
+
+Returns the configured buffered-body limit.
+
+=head2 max_streaming_body_bytes
+
+Returns the configured queued streaming-body limit.
+
+=head2 qpack_max_table_capacity
+
+Returns the configured QPACK table capacity.
+
+=head2 qpack_blocked_streams
+
+Returns the configured QPACK blocked-stream limit.
+
+=head2 extended_connect_enabled
+
+True when this server advertises Extended CONNECT support.
+
+=head2 peer_extended_connect_enabled
+
+True when the peer advertised Extended CONNECT support.
+
+=head2 http_datagrams_enabled
+
+True when this endpoint advertises SETTINGS_H3_DATAGRAM.
+
+=head2 peer_http_datagrams_enabled
+
+True when the peer advertised SETTINGS_H3_DATAGRAM.
+
+=head2 can_send_http_datagrams
+
+True when HTTP Datagrams are negotiated and Net::QUIC currently permits QUIC
+DATAGRAM transmission.
+
+=head2 can_receive_http_datagrams
+
+True when HTTP Datagrams are negotiated and local QUIC DATAGRAM receive support
+is active.
+
+=head2 datagram_receive_drops
+
+Returns the number of incoming HTTP Datagram payloads dropped because bounded
+Transaction receive queues were full.
+
+=head2 local_settings_state
+
+Returns an opaque byte string representing this endpoint's advertised HTTP/3
+SETTINGS. Store it without modifying it.
+
+=head2 peer_settings_state
+
+Returns an opaque byte string representing the current peer HTTP/3 SETTINGS
+after C<peer_settings_received> becomes true. Before that it returns undef.
+
+A client should save this with Net::QUIC's early-data state from the same
+connection when it intends to attempt 0-RTT later.
+
+=head2 using_remembered_peer_settings
+
+True while a returning client is still using remembered server SETTINGS before
+the new server SETTINGS frame arrives.
+
+=head2 peer_settings_received
+
+True after the peer SETTINGS frame has been accepted.
+
+=head2 early_data_status
+
+Returns Net::QUIC's early-data status:
+
+    none
+    pending
+    accepted
+    rejected
+
+Calling this method also applies any required HTTP/3 rollback after QUIC rejects
+early data.
+
+=head2 extension_settings
+
+Returns a copy of the local extension SETTINGS.
+
+=head2 extension_setting
+
+    my $value = $h3->extension_setting($id);
+    $h3->extension_setting($id, $value);
+
+Gets or sets one extension SETTING. Values may only be changed before
+C<start>.
+
+Core, HTTP/3-reserved, and GREASE setting identifiers cannot be assigned
+extension semantics.
+
+=head2 peer_extension_settings
+
+Returns a copy of peer extension SETTINGS.
+
+=head2 peer_extension_setting
+
+    my $value = $h3->peer_extension_setting($id);
+
+Returns one peer extension SETTING, or undef if it was not advertised.
+
+=head2 extension_stream_handler
+
+    $h3->extension_stream_handler(
+        $type,
+        sub {
+            my ($connection, $stream) = @_;
+            ...
+        },
+    );
+
+Registers one incoming extension unidirectional stream handler before
+C<start>.
+
+=head2 open_extension_stream
+
+    my $stream = $h3->open_extension_stream($type);
+
+Opens an outgoing HTTP/3 extension unidirectional stream.
+
+Returns L<Unblock::HTTP3::Extension::Stream>, or undef when QUIC
+unidirectional stream credit is exhausted.
 
 =head2 shutdown_notice
 
-Sends the first graceful HTTP/3 shutdown notice.
+Sends the first graceful HTTP/3 shutdown notice. Returns the Connection.
 
 =head2 shutdown
 
-Begins final HTTP/3 graceful shutdown.
+Begins final graceful HTTP/3 shutdown. Returns the Connection.
 
-An event-loop adapter or application decides when enough time has passed
-between C<shutdown_notice> and C<shutdown>.
+The application or event-loop adapter decides how long to allow between
+C<shutdown_notice> and C<shutdown>.
 
 =head2 shutdown_notice_sent
 
@@ -4340,20 +4381,33 @@ True after final graceful shutdown has started.
 =head2 remote_shutdown_id
 
 Returns the most recent shutdown identifier received from the peer, or undef
-before the peer starts graceful shutdown.
+before the peer begins graceful shutdown.
 
 =head2 drained
 
-Server only.
+Server only. True when graceful shutdown has no request streams left to
+process.
 
-True when graceful shutdown has no request streams left to process.
+=head1 NOTES
 
-=head2 failed
+Unblock::HTTP3 does not own the event loop. Network and timer activity continue
+to be driven through Net::QUIC.
 
-True after a fatal local HTTP/3 error.
+HTTP/3 Server Push is not exposed because the libnghttp3 version used by this
+release does not implement it.
 
-=head2 error
+=head1 SEE ALSO
 
-Returns the saved error text after C<failed> becomes true.
+L<Unblock::HTTP3>, L<Unblock::HTTP3::Transaction>,
+L<Unblock::HTTP3::Request>, L<Unblock::HTTP3::Response>, L<Net::QUIC>,
+L<Uniform::HTTP>
 
-=head2 error_code
+=head1 AUTHOR
+
+Joshua S. Day
+
+=head1 LICENSE
+
+This software is available under the MIT License.
+
+=cut

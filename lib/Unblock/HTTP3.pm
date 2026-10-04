@@ -15,22 +15,77 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3 - HTTP/3 engine for Perl
+Unblock::HTTP3 - non-blocking HTTP/3 protocol engine for Perl
+
+=head1 SYNOPSIS
+
+    use Unblock::HTTP3::Connection;
+    use Uniform::HTTP::Request;
+
+    my $h3 = Unblock::HTTP3::Connection->client(
+        quic => $quic,
+    );
+
+    $h3->start;
+
+    my $tx = $h3->request(
+        Uniform::HTTP::Request->new(
+            method    => 'GET',
+            target    => '/',
+            scheme    => 'https',
+            authority => 'example.com',
+        ),
+    );
 
 =head1 DESCRIPTION
 
-Unblock::HTTP3 is an HTTP/3 protocol engine designed to remain operating-system and event-loop neutral.
+Unblock::HTTP3 is an HTTP/3 protocol engine.
 
-It uses libnghttp3 through Alien::nghttp3 for HTTP/3 framing and QPACK and
-uses Net::QUIC for QUIC transport.
+It sits above L<Net::QUIC> and uses L<Uniform::HTTP> request and response
+objects. It does not own UDP sockets, timers, TLS configuration, or an event
+loop.
 
-Unblock::HTTP3 does not own UDP sockets, timers, or an event loop. The event-loop
-adapter remains below Net::QUIC.
+libnghttp3 is supplied through L<Alien::nghttp3> and is used for HTTP/3 framing
+and QPACK.
 
-Uniform::HTTP 0.04 supplies the runtime HTTP message semantics.
-Unblock::HTTP3::Request and Unblock::HTTP3::Response are thin subclasses of the
-Uniform request and response classes, and client connections also accept a
-plain Uniform::HTTP::Request directly.
+The main public objects are L<Unblock::HTTP3::Connection> and
+L<Unblock::HTTP3::Transaction>. Streaming bodies, Capsules, HTTP Datagrams,
+Extended CONNECT, extension SETTINGS, extension streams, priorities, graceful
+shutdown, and replay-aware 0-RTT are built around those objects.
+
+=head1 MODULES
+
+=over 4
+
+=item L<Unblock::HTTP3::Connection>
+
+One HTTP/3 connection over one Net::QUIC connection.
+
+=item L<Unblock::HTTP3::Transaction>
+
+One HTTP/3 request stream and its response.
+
+=item L<Unblock::HTTP3::Request>
+
+Optional thin subclass of L<Uniform::HTTP::Request> with HTTP/3 helpers.
+
+=item L<Unblock::HTTP3::Response>
+
+Optional thin subclass of L<Uniform::HTTP::Response> with HTTP/3 diagnostics.
+
+=item L<Unblock::HTTP3::Body::Stream>
+
+Writable outgoing body stream.
+
+=item L<Unblock::HTTP3::Body::Reader>
+
+Readable incoming body stream.
+
+=back
+
+=head1 SEE ALSO
+
+L<Net::QUIC>, L<Uniform::HTTP>, L<Alien::nghttp3>
 
 =head1 AUTHOR
 

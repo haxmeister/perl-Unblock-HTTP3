@@ -65,5 +65,8 @@ Revision history for Unblock-HTTP3
     - Test dependencies from CPAN rather than GitHub development code.
     - Make TLS loopback tests self-contained with bundled localhost fixtures
       instead of requiring the openssl command-line tool.
+    - Simplify README and public POD into the standard practical CPAN format.
+    - Add consistent SYNOPSIS, METHODS, SEE ALSO, AUTHOR, and LICENSE sections
+      across the public API documentation.
     - Add public interoperability tests against Cloudflare and LiteSpeed HTTP/3
       servers, with Google retained as a diagnostic target.
