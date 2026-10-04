@@ -12,7 +12,7 @@ my $target_bytes =
 my $max_iterations =
     $ENV{UNBLOCK_HTTP3_BODY_BENCH_MAX_ITERATIONS} // 50_000;
 my $sizes_text =
-    $ENV{UNBLOCK_HTTP3_BODY_BENCH_SIZES} // '64,1024,16384,65536,262144';
+    $ENV{UNBLOCK_HTTP3_BODY_BENCH_SIZES} // '64,1024,16384,65536,262144,1048576';
 
 for my $pair (
     [ target_bytes => $target_bytes ],
