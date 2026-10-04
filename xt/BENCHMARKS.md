@@ -139,7 +139,14 @@ For each chunk size it measures:
 
 The native DATA case primes a real libnghttp3 request stream once, then feeds
 repeat DATA frames through the normal native read callback. It therefore
-includes the current native DATA-to-Perl ownership copy without including QUIC.
+includes the native DATA-to-Perl ownership copy without including QUIC.
+
+The buffered cases exercise the production receive strategy. Small DATA chunks
+use the compact scalar accumulation path. Chunks of 16 KiB or larger retain
+their already-owned Perl scalars and are coalesced once when the complete
+Uniform message body is created. Streaming cases retain the same owned event
+scalar until application consumption returns receive credit. No benchmark case
+uses borrowed libnghttp3 callback memory.
 
 Run it with:
 
