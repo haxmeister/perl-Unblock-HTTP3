@@ -41,7 +41,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-Unblock::HTTP3 0.01 requires:
+Unblock::HTTP3 0.02 requires:
 
 ```text
 Perl            5.20+
@@ -330,8 +330,8 @@ request if QUIC rejects it.
 On the server, early request bytes can be parsed before the handshake finishes,
 but the Transaction is not exposed to application code until the QUIC
 handshake completes and the early data has not been rejected. Early HTTP
-Datagrams are bounded and held with the Transaction until that point. This is the safe default required
-by the HTTP early-data replay rules.
+Datagrams are bounded and held with the Transaction until that point. This is
+the safe default required by the HTTP early-data replay rules.
 
 See `Unblock::HTTP3::Connection` and `docs/ARCHITECTURE.md` for the complete
 SETTINGS persistence rules.
@@ -414,6 +414,7 @@ outside normal CPAN installation tests.
 - `Unblock::HTTP3::Capsule` - RFC 9297 Capsules
 - `Unblock::HTTP3::Extension::Stream` - generic extension streams
 - `docs/ARCHITECTURE.md` - protocol ownership and internal data flow
+- `docs/RFC-COMPLIANCE.md` - standards coverage and native-library limits
 
 ## License
 
