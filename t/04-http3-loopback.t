@@ -2,7 +2,6 @@ use strict;
 use warnings;
 
 use FindBin ();
-use File::Temp qw(tempdir);
 use IO::Select;
 use IO::Socket::INET;
 use Scalar::Util qw(refaddr);
@@ -19,32 +18,11 @@ use Uniform::HTTP::Request;
 
 is($Net::QUIC::VERSION, '0.04', 'vertical slice uses CPAN Net::QUIC 0.04');
 
-my $tls_dir = tempdir(CLEANUP => 1);
-my $cert_file = "$tls_dir/server-cert.pem";
-my $key_file = "$tls_dir/server-key.pem";
+my $cert_file = "$FindBin::Bin/fixtures/localhost-cert.pem";
+my $key_file = "$FindBin::Bin/fixtures/localhost-key.pem";
 
-my $openssl_config = "$tls_dir/openssl.cnf";
-
-open my $openssl_config_fh, '>', $openssl_config
-    or die "could not create loopback OpenSSL config: $!";
-print {$openssl_config_fh} <<'OPENSSL_CONFIG';
-[ req ]
-distinguished_name = dn
-prompt = no
-
-[ dn ]
-CN = localhost
-OPENSSL_CONFIG
-close $openssl_config_fh
-    or die "could not close loopback OpenSSL config: $!";
-
-system(
-    'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
-    '-keyout', $key_file,
-    '-out', $cert_file,
-    '-config', $openssl_config,
-    '-days', '1',
-) == 0 or die "could not generate loopback TLS test certificate with openssl";
+-f $cert_file or die "missing bundled loopback TLS certificate: $cert_file";
+-f $key_file or die "missing bundled loopback TLS private key: $key_file";
 
 sub make_udp_socket {
     my $socket = IO::Socket::INET->new(

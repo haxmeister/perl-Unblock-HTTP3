@@ -24,6 +24,8 @@ lib/Unblock/HTTP3/Response.pm
 lib/Unblock/HTTP3/Transaction.pm
 lib/Unblock/HTTP3/_Bytes.pm
 lib/Unblock/HTTP3/_Native.pm
+t/fixtures/localhost-cert.pem
+t/fixtures/localhost-key.pem
 t/00-load.t
 t/01-native.t
 t/02-uniform-contract.t

@@ -56,7 +56,6 @@ WriteMakefile(
     },
 
     TEST_REQUIRES => {
-        'File::Temp'       => 0,
         'FindBin'          => 0,
         'IO::Select'       => 0,
         'IO::Socket::INET' => 0,

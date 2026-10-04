@@ -63,5 +63,7 @@ Revision history for Unblock-HTTP3
     - Keep event loops, UDP sockets, TLS, and QUIC packet processing
       outside Unblock::HTTP3.
     - Test dependencies from CPAN rather than GitHub development code.
+    - Make TLS loopback tests self-contained with bundled localhost fixtures
+      instead of requiring the openssl command-line tool.
     - Add public interoperability tests against Cloudflare and LiteSpeed HTTP/3
       servers, with Google retained as a diagnostic target.
