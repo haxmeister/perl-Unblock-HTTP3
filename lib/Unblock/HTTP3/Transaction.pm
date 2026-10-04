@@ -684,7 +684,6 @@ sub _append_buffered_body {
     $self->{ $kind . '_buffered_seen' } = 1;
 
     my $length = length($bytes);
-    return unless $length;
 
     if ($length < $BUFFERED_BODY_RETAIN_BYTES) {
         $self->{ $kind . '_buffered_body' } .= $bytes;
