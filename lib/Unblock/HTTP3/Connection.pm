@@ -3517,25 +3517,11 @@ sub _drain_events {
             next;
         }
 
-        if ($type eq 'begin_headers') {
-            $self->{building}{$id} = {
-                pseudo             => {},
-                headers            => [],
-                field_section_size => 0,
-            };
-            next;
-        }
-
-        if ($type eq 'header') {
-            my ($name, $value) = @args;
-            my $building = $self->{building}{$id}
-                or croak "received HTTP/3 header without a header section";
-
-            $building->{field_section_size}
-                += length($name) + length($value) + 32;
+        if ($type eq 'headers') {
+            my ($block, $fin) = @args;
 
             if (
-                $building->{field_section_size}
+                $block->field_section_size
                 > $self->{max_field_section_size}
             ) {
                 $self->_fail_connection(
@@ -3545,17 +3531,11 @@ sub _drain_events {
                 next;
             }
 
-            if (substr($name, 0, 1) eq ':') {
-                $building->{pseudo}{$name} = $value;
-            } else {
-                push @{ $building->{headers} }, [ $name, $value ];
-            }
-
-            next;
-        }
-
-        if ($type eq 'end_headers') {
-            $self->_finish_headers($id, $args[0] ? 1 : 0);
+            $self->_finish_headers(
+                $id,
+                $block,
+                $fin ? 1 : 0,
+            );
             next;
         }
 
@@ -3840,55 +3820,49 @@ sub _received_response {
 }
 
 sub _finish_headers {
-    my ($self, $id, $fin) = @_;
+    my ($self, $id, $block, $fin) = @_;
 
-    my $building = delete $self->{building}{$id}
-        or croak 'HTTP/3 header section ended without beginning';
-
-    my $pseudo = $building->{pseudo};
     my $message;
 
     if ($self->{role} eq 'server') {
-        croak 'HTTP/3 request is missing :method'
-            unless defined $pseudo->{':method'};
+        my $method = $block->pseudo(':method');
 
-        my $is_connect = $pseudo->{':method'} eq 'CONNECT' ? 1 : 0;
-        my $protocol = exists($pseudo->{':protocol'})
-            ? $pseudo->{':protocol'}
-            : undef;
+        croak 'HTTP/3 request is missing :method'
+            unless defined $method;
+
+        my $scheme = $block->pseudo(':scheme');
+        my $authority = $block->pseudo(':authority');
+        my $path = $block->pseudo(':path');
+        my $protocol = $block->pseudo(':protocol');
+        my $is_connect = $method eq 'CONNECT' ? 1 : 0;
         my $is_extended_connect =
             $is_connect && defined($protocol) ? 1 : 0;
-        my %args;
+        my $target;
+        my $host_values = $block->header_values('host');
 
         if ($is_connect && !$is_extended_connect) {
             croak 'HTTP/3 CONNECT request is missing :authority'
-                unless defined $pseudo->{':authority'};
+                unless defined $authority;
             croak 'HTTP/3 CONNECT request must not contain :scheme'
-                if exists $pseudo->{':scheme'};
+                if defined $scheme;
             croak 'HTTP/3 CONNECT request must not contain :path'
-                if exists $pseudo->{':path'};
+                if defined $path;
+
+            $target = $authority;
 
             my $semantic_error = _request_semantic_error(
                 method      => 'CONNECT',
                 scheme      => undef,
-                authority   => $pseudo->{':authority'},
-                target      => $pseudo->{':authority'},
+                authority   => $authority,
+                target      => $target,
                 protocol    => undef,
-                host_values => _request_host_values($building->{headers}),
+                host_values => $host_values,
             );
 
             if (defined $semantic_error) {
                 $self->_reject_message_stream($id, $semantic_error);
                 return;
             }
-
-            %args = (
-                method    => 'CONNECT',
-                target    => $pseudo->{':authority'},
-                authority => $pseudo->{':authority'},
-                version   => '3',
-                headers   => $building->{headers},
-            );
         } else {
             if ($is_extended_connect && !$self->{enable_extended_connect}) {
                 $self->_reject_message_stream(
@@ -3898,7 +3872,7 @@ sub _finish_headers {
                 return;
             }
 
-            if ($is_extended_connect && !defined $pseudo->{':path'}) {
+            if ($is_extended_connect && !defined $path) {
                 $self->_reject_message_stream(
                     $id,
                     'Extended CONNECT requires :path',
@@ -3907,28 +3881,15 @@ sub _finish_headers {
             }
 
             croak 'HTTP/3 request is missing :path'
-                unless defined $pseudo->{':path'};
+                unless defined $path;
 
-            %args = (
-                method  => $pseudo->{':method'},
-                target  => $pseudo->{':path'},
-                version => '3',
-                headers => $building->{headers},
-            );
+            $target = $path;
 
-            $args{scheme} = $pseudo->{':scheme'}
-                if exists $pseudo->{':scheme'};
-            $args{authority} = $pseudo->{':authority'}
-                if exists $pseudo->{':authority'};
-            $args{protocol} = $protocol
-                if defined $protocol;
-
-            my $host_values = _request_host_values($building->{headers});
             my $semantic_error = _request_semantic_error(
-                method      => $pseudo->{':method'},
-                scheme      => $pseudo->{':scheme'},
-                authority   => $pseudo->{':authority'},
-                target      => $pseudo->{':path'},
+                method      => $method,
+                scheme      => $scheme,
+                authority   => $authority,
+                target      => $target,
                 protocol    => $protocol,
                 host_values => $host_values,
             );
@@ -3938,12 +3899,19 @@ sub _finish_headers {
                 return;
             }
 
-            if (!exists($args{authority}) && @$host_values == 1) {
-                $args{authority} = $host_values->[0];
+            if (!defined($authority) && @$host_values == 1) {
+                $authority = $host_values->[0];
             }
         }
 
-        $message = _received_request(\%args, $fin);
+        $message = $block->uniform_request(
+            $method,
+            $target,
+            $scheme,
+            $authority,
+            $protocol,
+            $fin,
+        );
 
         my $response = Uniform::HTTP::Response->new(
             status  => 200,
@@ -3999,22 +3967,24 @@ sub _finish_headers {
             push @{ $self->{ready_transactions} }, $transaction;
         }
     } else {
+        my $status = $block->pseudo(':status');
+
         croak 'HTTP/3 response is missing :status'
-            unless defined $pseudo->{':status'};
+            unless defined $status;
 
-        my $capsule_error = _capsule_protocol_response_error(
-            0 + $pseudo->{':status'},
-            $building->{headers},
-        );
-
-        if (defined $capsule_error) {
-            $self->_reject_message_stream($id, $capsule_error);
+        if (
+            $block->has_header('capsule-protocol')
+            && !(0 + $status >= 200 && 0 + $status < 300)
+        ) {
+            $self->_reject_message_stream(
+                $id,
+                'Capsule-Protocol is only valid on a successful HTTP/3 response',
+            );
             return;
         }
 
-        $message = _received_response(
-            $pseudo->{':status'},
-            $building->{headers},
+        $message = $block->uniform_response(
+            0 + $status,
             $fin,
         );
 
