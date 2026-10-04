@@ -2,7 +2,7 @@ Revision history for Unblock-HTTP3
 
 0.01  not yet released
     - Start Unblock::HTTP3.
-    - Require released Net::QUIC 0.03 for QUIC transport.
+    - Require released Net::QUIC 0.04 for QUIC transport and RFC 9221 DATAGRAM.
     - Use Alien::nghttp3 0.01 for libnghttp3.
     - Add native client and server libnghttp3 connection state.
     - Add the HTTP/3 control and QPACK stream bridge.
@@ -20,6 +20,9 @@ Revision history for Unblock-HTTP3
     - Add basic CONNECT tunnels with bidirectional DATA and half-close.
     - Add generic Extended CONNECT negotiation and :protocol support.
     - Add generic RFC 9297 Capsule framing, parsing, dispatch, and streams.
+    - Add RFC 9297 HTTP Datagrams over Net::QUIC 0.04, including
+      SETTINGS_H3_DATAGRAM, Quarter Stream ID routing, Transaction send/receive
+      APIs, bounded receive buffering, and H3_DATAGRAM_ERROR handling.
     - Add generic HTTP/3 extension unidirectional streams.
     - Add RFC 9218 request priority fields and live Transaction priority updates.
     - Synchronize libnghttp3 client-stream ID validation with Net::QUIC stream limits.

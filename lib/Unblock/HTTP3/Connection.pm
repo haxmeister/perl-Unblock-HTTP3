@@ -3497,12 +3497,28 @@ Useful options include:
     max_streaming_body_bytes
     receive_body
     enable_extended_connect
+    enable_http_datagrams
+    datagram_request
+    max_buffered_datagram_bytes
+    max_buffered_datagrams
     extension_settings
     on_extension_settings
 
 C<enable_extended_connect> is a server-only boolean. When enabled, the
 server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL and accepts the generic
 C<:protocol> pseudo-header used by Extended CONNECT.
+
+C<enable_http_datagrams> advertises SETTINGS_H3_DATAGRAM. The wrapped
+Net::QUIC connection must have been created with QUIC DATAGRAM receive support.
+
+C<datagram_request> is a server-only callback used to decide whether an incoming
+request defines HTTP Datagram semantics. It receives the Connection and Request
+and returns true to enable datagrams on the new Transaction. This keeps
+WebTransport, MASQUE, and other protocol names outside Unblock::HTTP3.
+
+C<max_buffered_datagram_bytes> and C<max_buffered_datagrams> bound the
+Transaction pull-style receive queues. Excess unreliable datagrams are dropped
+and counted by C<datagram_receive_drops>.
 
 C<extension_settings> is a hash reference of additional HTTP/3 SETTINGS
 identifier/value pairs. SETTINGS reserved for dedicated Unblock::HTTP3/libnghttp3
@@ -3515,7 +3531,7 @@ extension SETTINGS. The callback may C<die> to reject invalid extension
 settings. Unblock::HTTP3 then closes the connection with C<H3_SETTINGS_ERROR>.
 
 C<quic_max_bidi_streams> is a server-side synchronization hint for
-libnghttp3. It defaults to 100, matching Net::QUIC 0.03. If the QUIC server was
+libnghttp3. It defaults to 100, matching Net::QUIC 0.04. If the QUIC server was
 created with a different C<transport-E<gt>{max_bidi_streams}> value, pass the
 same value here.
 
@@ -3524,6 +3540,29 @@ should be consumed through L<Unblock::HTTP3::Body::Reader> instead of copied int
 the Request or Response body.
 
 =head1 METHODS
+
+=head2 http_datagrams_enabled
+
+True when this endpoint advertises SETTINGS_H3_DATAGRAM.
+
+=head2 peer_http_datagrams_enabled
+
+True after the peer advertises SETTINGS_H3_DATAGRAM.
+
+=head2 can_send_http_datagrams
+
+True when both HTTP/3 endpoints negotiated datagrams and Net::QUIC reports that
+the peer accepts QUIC DATAGRAM frames.
+
+=head2 can_receive_http_datagrams
+
+True when both HTTP/3 endpoints negotiated datagrams and local QUIC DATAGRAM
+receive support is active.
+
+=head2 datagram_receive_drops
+
+Returns the number of HTTP Datagram payloads dropped because the bounded
+Transaction receive queues were full.
 
 =head2 start
 
@@ -3574,6 +3613,10 @@ Returns one peer extension SETTING, or C<undef> if it was not advertised.
 True after the peer SETTINGS frame has been accepted.
 
 =head2 request
+
+A client may pass C<datagrams =E<gt> 1> to mark the new request as defining
+HTTP Datagram semantics. This does not assign meaning to the datagram payload;
+the higher-level HTTP extension owns those bytes.
 
 Client only.
 

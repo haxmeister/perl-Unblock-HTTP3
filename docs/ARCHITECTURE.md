@@ -17,6 +17,7 @@ It owns:
 - basic and Extended CONNECT tunnels
 - generic HTTP/3 extension SETTINGS
 - generic RFC 9297 Capsule Protocol streams
+- RFC 9297 HTTP Datagrams over QUIC DATAGRAM
 - generic HTTP/3 extension unidirectional streams
 - RFC 9218 request priority
 - HTTP message validation
@@ -76,6 +77,7 @@ It also owns:
 
 - request and response body streams
 - informational responses
+- HTTP Datagram send and receive state
 - live RFC 9218 request priority
 - cancellation state
 - completion state
@@ -84,7 +86,7 @@ Applications do not need to match responses with raw QUIC stream IDs.
 
 ## QUIC boundary
 
-Unblock::HTTP3 uses the public protocol-engine API in Net::QUIC 0.03.
+Unblock::HTTP3 uses the public protocol-engine API in Net::QUIC 0.04.
 
 Receive data follows this path:
 
@@ -118,6 +120,20 @@ Stream activity is coalesced through:
 
     Net::QUIC::Connection->on_stream_activity
     Net::QUIC::Connection->next_active_stream_id
+
+HTTP Datagrams use the separate Net::QUIC 0.04 RFC 9221 boundary:
+
+    Transaction->send_datagram
+        -> Quarter Stream ID + payload
+        -> Net::QUIC::Connection->send_datagram
+
+    Net::QUIC::Connection->on_datagram
+        -> decode Quarter Stream ID
+        -> Transaction callback or bounded receive queue
+
+Net::QUIC owns QUIC DATAGRAM negotiation, path capacity, unreliable delivery,
+and transmit backpressure. Unblock::HTTP3 owns SETTINGS_H3_DATAGRAM, HTTP request
+association, and H3_DATAGRAM_ERROR.
 
 Unblock::HTTP3 does not reach into Net::QUIC native structures.
 
@@ -381,10 +397,11 @@ shutdown.
 
 The first release is focused on the core HTTP/3 engine.
 
-Remaining Unblock::HTTP3 work includes:
+HTTP Datagrams and the current generic HTTP/3 extension surface are implemented.
 
-- HTTP Datagrams after Net::QUIC exposes QUIC DATAGRAM transport
-- additional generic HTTP/3 extension hooks
+HTTP Datagram 0-RTT is intentionally deferred until Unblock::HTTP3 has a
+persistent HTTP/3 SETTINGS state format that can validate SETTINGS_H3_DATAGRAM
+across resumed connections.
 
 WebTransport and MASQUE applications are higher-level protocols, not missing
 Unblock::HTTP3 features. They can build on the generic HTTP/3 facilities provided
@@ -400,7 +417,7 @@ Development and CI test released CPAN dependencies.
 The current baseline is:
 
 - Alien::nghttp3 0.01
-- Net::QUIC 0.03
+- Net::QUIC 0.04
 - Uniform::HTTP 0.02 for contract tests
 
 Unblock::HTTP3 integration tests do not install Net::QUIC from GitHub.
@@ -433,6 +450,9 @@ The real loopback suite currently proves:
 20. protocol-neutral Extended CONNECT rejection
 21. generic Capsule Protocol framing and dispatch
 22. malformed Capsule stream isolation
+23. SETTINGS_H3_DATAGRAM negotiation over Net::QUIC 0.04
+24. bidirectional HTTP Datagram routing by Quarter Stream ID
+25. HTTP Datagram callbacks, zero-length payloads, and H3_DATAGRAM_ERROR
 23. RFC 9218 initial and live priority updates
 24. bodyless response semantics
 25. outgoing Content-Length validation

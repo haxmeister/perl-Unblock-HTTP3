@@ -41,23 +41,30 @@ Unblock::HTTP3 now provides:
 Extended CONNECT remains generic. Unblock::HTTP3 does not hard-code WebTransport,
 MASQUE, or another protocol that may use it.
 
-## HTTP Datagrams - blocked on Net::QUIC
+## HTTP Datagrams - complete
 
-HTTP Datagrams from RFC 9297 are not implemented yet.
+HTTP Datagrams from RFC 9297 are implemented over Net::QUIC 0.04.
 
-Released Net::QUIC 0.03 does not implement the standardized QUIC DATAGRAM
-extension. Unblock::HTTP3 therefore cannot provide real HTTP/3 Datagrams without
-duplicating transport functionality that belongs in Net::QUIC.
+Unblock::HTTP3 now provides:
 
-When Net::QUIC exposes QUIC DATAGRAM transport, Unblock::HTTP3 still needs:
+- SETTINGS_H3_DATAGRAM advertisement and peer capability inspection
+- Quarter Stream ID encoding and decoding
+- request-to-datagram routing through Transaction objects
+- explicit protocol-neutral opt-in for request datagram semantics
+- Transaction send, pull receive, callback receive, and payload-size APIs
+- bounded HTTP Datagram receive buffering with drop accounting
+- H3_DATAGRAM_ERROR handling for malformed datagrams and invalid semantics
+- real client/server tests over UDP, TLS, QUIC, and HTTP/3
 
-- SETTINGS_H3_DATAGRAM
-- mapping HTTP Datagrams to the correct HTTP request stream
-- sending and receiving datagram payloads through Net::QUIC
-- proper error handling and capability negotiation
-- real client/server tests
+Net::QUIC continues to own RFC 9221 QUIC DATAGRAM transport, path sizing,
+unreliable delivery, and transmit backpressure. Unblock::HTTP3 does not duplicate
+that layer.
 
-Unblock::HTTP3 will not create a private UDP or QUIC DATAGRAM replacement.
+HTTP Datagram 0-RTT remains intentionally disabled. Net::QUIC 0.04 exposes early
+DATAGRAM transport state, but RFC 9297 also requires cached HTTP/3
+SETTINGS_H3_DATAGRAM state to be retained and validated across connections.
+Unblock::HTTP3 does not persist HTTP/3 SETTINGS state yet, so received early
+DATAGRAMs are dropped.
 
 ## Capsule Protocol - complete
 
@@ -86,6 +93,7 @@ Unblock::HTTP3 now exposes reusable protocol-neutral extension primitives for:
 - Extended CONNECT protocol identifiers
 - Capsule types
 - extension unidirectional stream types
+- HTTP Datagram request semantics and routing
 
 Registered extension stream types are dispatched outside libnghttp3. Unknown
 and GREASE stream types remain non-semantic and are discarded without failing

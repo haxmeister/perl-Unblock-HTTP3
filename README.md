@@ -56,6 +56,7 @@ Unblock::HTTP3 supports:
 - enforce bodyless response rules
 - support basic and generic Extended CONNECT tunnels
 - frame, parse, send, and receive generic RFC 9297 Capsules
+- negotiate, route, send, and receive RFC 9297 HTTP Datagrams
 - cancel requests and handle RESET_STREAM and STOP_SENDING
 - apply bounded output and receive buffering
 - limit decoded field sections and message bodies
@@ -79,7 +80,7 @@ One HTTP/3 connection wraps one Net::QUIC::Connection:
         quic => $quic,
     );
 
-On servers, Unblock::HTTP3 mirrors Net::QUIC 0.03's default of 100 initial peer
+On servers, Unblock::HTTP3 mirrors Net::QUIC 0.04's default of 100 initial peer
 bidirectional streams into libnghttp3. If the QUIC server was configured with a
 different `transport->{max_bidi_streams}` value, pass the same value as
 `quic_max_bidi_streams` when constructing the HTTP/3 server connection.
@@ -207,14 +208,36 @@ Extended CONNECT is implemented generically on top of the SETTINGS support.
 Capsule Protocol support is implemented generically on Extended CONNECT data
 streams.
 
-HTTP Datagrams remain blocked because released Net::QUIC 0.03 does not expose
-the QUIC DATAGRAM transport required by RFC 9297. Unblock::HTTP3 will not duplicate
-that transport layer.
+HTTP Datagrams from RFC 9297 are implemented on top of Net::QUIC 0.04.
 
-The following Unblock::HTTP3 work is still deferred beyond the core 0.01 release:
+Enable QUIC DATAGRAM transport when creating the Net::QUIC endpoint, then opt the
+HTTP/3 connection into SETTINGS_H3_DATAGRAM:
 
-- HTTP Datagrams, after Net::QUIC gains QUIC DATAGRAM support
-- remaining generic HTTP/3 extension hooks
+    my $h3 = Unblock::HTTP3::Connection->client(
+        quic                  => $quic,
+        enable_http_datagrams => 1,
+    );
+
+A client marks a request as having HTTP Datagram semantics when it creates the
+Transaction:
+
+    my $tx = $h3->request(
+        $request,
+        datagrams => 1,
+    );
+
+Servers use the protocol-neutral C<datagram_request> predicate to decide whether
+an incoming request defines HTTP Datagram semantics. The Transaction then owns
+C<send_datagram>, C<next_datagram>, C<on_datagram>, and
+C<max_datagram_payload_size>.
+
+Unblock::HTTP3 handles SETTINGS_H3_DATAGRAM, Quarter Stream IDs, bounded receive
+buffering, and H3_DATAGRAM_ERROR. Higher-level protocols still define what the
+payload bytes mean.
+
+HTTP Datagram 0-RTT is intentionally not enabled yet. Net::QUIC exposes the
+transport capability, but Unblock::HTTP3 does not currently persist and validate
+the HTTP/3 SETTINGS state required for safe RFC 9297 0-RTT use.
 
 libnghttp3 1.18.0 does not implement HTTP/3 Server Push, so Unblock::HTTP3 does
 not expose Server Push.
@@ -230,7 +253,7 @@ See [MISSING_FEATURES.md](MISSING_FEATURES.md) for the detailed roadmap.
 The dependency baseline is made from released CPAN modules:
 
     Alien::nghttp3 0.01
-    Net::QUIC      0.03
+    Net::QUIC      0.04
     Uniform::HTTP  0.02
 
 CI installs these modules from CPAN.

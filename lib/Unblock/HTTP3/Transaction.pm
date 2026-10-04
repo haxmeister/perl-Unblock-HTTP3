@@ -785,6 +785,44 @@ Transaction.
 Higher-level protocols remain responsible for deciding when Capsule Protocol
 use has been negotiated.
 
+=head2 datagrams_enabled
+
+True when the higher-level HTTP extension marked this request as defining HTTP
+Datagram semantics.
+
+=head2 send_datagram
+
+    my $accepted = $tx->send_datagram($bytes);
+
+Sends one RFC 9297 HTTP Datagram through Net::QUIC. The Quarter Stream ID is
+added automatically. A false return preserves Net::QUIC's bounded transmit
+backpressure and means the caller should decide whether to retry or drop the
+unreliable payload.
+
+Both endpoints must have negotiated SETTINGS_H3_DATAGRAM and the request
+stream's local send side must still be open.
+
+=head2 next_datagram
+
+Returns the next received HTTP Datagram payload for this Transaction, or
+C<undef> when none is queued.
+
+=head2 on_datagram
+
+    $tx->on_datagram(sub {
+        my ($tx, $bytes) = @_;
+        ...
+    });
+
+Installs a callback for received HTTP Datagram payloads. Existing queued
+payloads are drained to the callback.
+
+=head2 max_datagram_payload_size
+
+Returns the current maximum payload bytes this Transaction can send after the
+Quarter Stream ID overhead is removed from Net::QUIC's current path capacity.
+Returns zero when HTTP Datagrams are not currently sendable.
+
 =head2 is_response_started
 
 True after the final response header section has started sending.
