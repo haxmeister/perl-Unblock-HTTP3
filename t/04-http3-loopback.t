@@ -431,7 +431,11 @@ my $outgoing_request = Uniform::HTTP::Request->new(
     scheme    => 'https',
     authority => 'localhost',
     headers   => [
-        [ Priority => 'u=5, i' ],
+        [ Priority   => 'u=5, i' ],
+        [ cookie     => 'a=1' ],
+        [ 'x-middle' => 'preserved' ],
+        [ cookie     => 'b=2' ],
+        [ cookie     => 'c=3; d=4' ],
     ],
 );
 
@@ -467,6 +471,27 @@ is(
     $incoming_request->authority,
     'localhost',
     'server receives request authority',
+);
+is(
+    $incoming_request->header_values('cookie'),
+    [ 'a=1; b=2; c=3; d=4' ],
+    'native receive path coalesces Cookie field lines',
+);
+is(
+    [
+        map {
+            [
+                $incoming_request->header_name($_),
+                $incoming_request->header_value($_),
+            ]
+        } 0 .. $incoming_request->header_count - 1
+    ],
+    [
+        [ 'priority', 'u=5, i' ],
+        [ 'cookie', 'a=1; b=2; c=3; d=4' ],
+        [ 'x-middle', 'preserved' ],
+    ],
+    'native receive path preserves field order around coalesced Cookie',
 );
 
 is(
@@ -570,6 +595,9 @@ my $outgoing_response = $server_transaction->response;
 isa_ok($outgoing_response, ['Uniform::HTTP::Response']);
 
 $outgoing_response->status(200);
+$outgoing_response->add_header(cookie => 'response-one=1');
+$outgoing_response->add_header('x-response' => 'preserved');
+$outgoing_response->add_header(cookie => 'response-two=2');
 $server_transaction->send_response;
 
 my $incoming_response;
@@ -586,6 +614,26 @@ isa_ok($incoming_response, ['Uniform::HTTP::Response']);
 is(ref($incoming_response), 'Uniform::HTTP::Response',
     'received final response is the exact canonical Uniform class');
 is($incoming_response->status, 200, 'client receives response status');
+is(
+    $incoming_response->header_values('cookie'),
+    [ 'response-one=1; response-two=2' ],
+    'native response receive path coalesces Cookie field lines',
+);
+is(
+    [
+        map {
+            [
+                $incoming_response->header_name($_),
+                $incoming_response->header_value($_),
+            ]
+        } 0 .. $incoming_response->header_count - 1
+    ],
+    [
+        [ 'cookie', 'response-one=1; response-two=2' ],
+        [ 'x-response', 'preserved' ],
+    ],
+    'native response receive path preserves field order around Cookie',
+);
 
 my $ready_client_transaction = $client_h3->next_transaction;
 is(
