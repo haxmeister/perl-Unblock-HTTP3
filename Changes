@@ -44,7 +44,13 @@ Revision history for Unblock-HTTP3
     - Coalesce decompressed Cookie field lines before exposing canonical
       Uniform HTTP messages.
     - Defer server application delivery of 0-RTT Transactions and Datagrams
-      until QUIC accepts early data and the handshake completes.
+      until the QUIC handshake completes and the early data has not been
+      rejected.
+    - Enforce the 0-or-1 value rules for Extended CONNECT and HTTP Datagram
+      SETTINGS in the HTTP/3 SETTINGS inspector.
+    - Enforce the RFC 9297 Capsule-Protocol response-status restriction.
+    - Document the remaining libnghttp3 limitations for malformed-message
+      stream scope and RFC 9218 invalid-parameter preservation.
 
 0.01  2026-10-04
     - Start Unblock::HTTP3.
