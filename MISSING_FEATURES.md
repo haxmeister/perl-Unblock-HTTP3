@@ -4,9 +4,11 @@ Unblock::HTTP3 implements the core HTTP/3 engine needed for normal client,
 server, multiplexing, streaming, CONNECT, Capsule, HTTP Datagram, RFC 9412
 ORIGIN, priority, graceful shutdown, and 0-RTT use.
 
-The RFC audit found one narrow RFC 9218 priority-parsing limitation in the
-libnghttp3 1.18.0 dependency. It does not block normal priority use, but it is
-recorded below because it prevents claiming perfect normative coverage.
+The RFC audit found two narrow conformance limitations in the libnghttp3
+1.18.0 dependency: malformed-message errors that the native parser can only
+surface as connection-fatal reads, and one RFC 9218 priority-parameter edge
+case. Neither blocks normal HTTP/3 use, but both prevent claiming perfect
+normative coverage.
 
 This file records work that is deliberately deferred so it does not get lost.
 
