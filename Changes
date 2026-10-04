@@ -33,6 +33,18 @@ Revision history for Unblock-HTTP3
     - Keep small buffered DATA chunks on the compact scalar path and retain
       owned chunks of 16 KiB or larger until one final message-body coalescing,
       reducing repeated large-body copies.
+    - Add a normative RFC conformance audit suite for malformed control,
+      QPACK, priority, push, and stream-lifecycle input.
+    - Treat peer closure, reset, or STOP_SENDING of critical HTTP/3 streams
+      as H3_CLOSED_CRITICAL_STREAM.
+    - Reject duplicate peer SETTINGS with H3_SETTINGS_ERROR so extension and
+      remembered 0-RTT state cannot become ambiguous.
+    - Reject unauthorized server push with H3_ID_ERROR when no push capacity
+      has been advertised.
+    - Coalesce decompressed Cookie field lines before exposing canonical
+      Uniform HTTP messages.
+    - Defer server application delivery of 0-RTT Transactions and Datagrams
+      until QUIC accepts early data and the handshake completes.
 
 0.01  2026-10-04
     - Start Unblock::HTTP3.
