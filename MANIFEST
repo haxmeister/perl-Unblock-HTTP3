@@ -35,3 +35,4 @@ t/09-capsule.t
 t/10-priority.t
 t/11-http-datagram.t
 
+t/12-settings-state.t
