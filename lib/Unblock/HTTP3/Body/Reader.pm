@@ -154,6 +154,14 @@ sub _push {
         $bytes,
     );
 
+    return $self->_push_owned($bytes);
+}
+
+sub _push_owned {
+    my ($self, $bytes) = @_;
+
+    return if $self->{cancelled};
+
     if (length $bytes) {
         push @{ $self->{queue} }, $bytes;
         $self->{pending} += length($bytes);
