@@ -13,6 +13,7 @@ use Unblock::HTTP3::Request ();
 our $VERSION = '0.01';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
+my $BUFFERED_BODY_SLAB_BYTES = 65_536;
 
 sub _new {
     my ($class, %args) = @_;
@@ -57,9 +58,11 @@ sub _new {
         early_data                => $early_data,
         response_streaming        => 0,
         request_buffered_body     => [],
+        request_buffered_tail     => '',
         request_buffered_bytes    => 0,
         request_buffered_seen     => 0,
         response_buffered_body    => [],
+        response_buffered_tail    => '',
         response_buffered_bytes   => 0,
         response_buffered_seen    => 0,
         response_output_started  => 0,
@@ -679,9 +682,29 @@ sub _append_buffered_body {
 
     $self->{ $kind . '_buffered_seen' } = 1;
 
-    if (length $bytes) {
-        push @{ $self->{ $kind . '_buffered_body' } }, $bytes;
-        $self->{ $kind . '_buffered_bytes' } += length($bytes);
+    my $length = length($bytes);
+    return unless $length;
+
+    my $chunks = $self->{ $kind . '_buffered_body' };
+    my $tail_name = $kind . '_buffered_tail';
+
+    $self->{ $kind . '_buffered_bytes' } += $length;
+
+    if ($length >= $BUFFERED_BODY_SLAB_BYTES) {
+        if (length($self->{$tail_name})) {
+            push @$chunks, $self->{$tail_name};
+            $self->{$tail_name} = '';
+        }
+
+        push @$chunks, $bytes;
+        return;
+    }
+
+    $self->{$tail_name} .= $bytes;
+
+    if (length($self->{$tail_name}) >= $BUFFERED_BODY_SLAB_BYTES) {
+        push @$chunks, $self->{$tail_name};
+        $self->{$tail_name} = '';
     }
 
     return;
@@ -703,17 +726,26 @@ sub _finish_received_message {
         && $self->{ $kind . '_buffered_seen' }
     ) {
         my $chunks = $self->{ $kind . '_buffered_body' };
+        my $tail_name = $kind . '_buffered_tail';
+
+        if (length($self->{$tail_name})) {
+            push @$chunks, $self->{$tail_name};
+            $self->{$tail_name} = '';
+        }
+
         my $body = @$chunks == 1
             ? $chunks->[0]
             : join('', @$chunks);
 
         $self->{ $kind . '_buffered_body' } = [];
+        $self->{ $kind . '_buffered_tail' } = '';
         $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
 
         $message->body($body);
     } else {
         $self->{ $kind . '_buffered_body' } = [];
+        $self->{ $kind . '_buffered_tail' } = '';
         $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
     }
@@ -729,6 +761,7 @@ sub _discard_received_body_buffers {
 
     for my $kind (qw(request response)) {
         $self->{ $kind . '_buffered_body' } = [];
+        $self->{ $kind . '_buffered_tail' } = '';
         $self->{ $kind . '_buffered_bytes' } = 0;
         $self->{ $kind . '_buffered_seen' } = 0;
     }
