@@ -38,6 +38,7 @@ sub buffered_transaction {
         response                 => $response,
         response_receive_mode    => 'buffered',
         response_buffered_body   => [],
+        response_buffered_tail   => '',
         response_buffered_bytes  => 0,
         response_buffered_seen   => 0,
     }, 'Unblock::HTTP3::Transaction';
@@ -52,9 +53,11 @@ sub terminal_transaction {
         datagram_callback        => undef,
         state                    => 'active',
         request_buffered_body    => [],
+        request_buffered_tail    => '',
         request_buffered_bytes   => 0,
         request_buffered_seen    => 0,
         response_buffered_body   => [],
+        response_buffered_tail   => '',
         response_buffered_bytes  => 0,
         response_buffered_seen   => 0,
     }, 'Unblock::HTTP3::Transaction';
@@ -98,6 +101,11 @@ is(
     scalar @{ $buffered->{response_buffered_body} },
     0,
     'buffered receive releases retained chunks after finalization',
+);
+is(
+    $buffered->{response_buffered_tail},
+    '',
+    'buffered receive releases the small-chunk slab after finalization',
 );
 
 my $single_response = Unblock::HTTP3::Response->new(status => 200);
@@ -240,6 +248,11 @@ is(
     0,
     'transaction error releases buffered receive chunks',
 );
+is(
+    $error_tx->{response_buffered_tail},
+    '',
+    'transaction error releases buffered receive slab storage',
+);
 
 my $cancel_tx = terminal_transaction();
 $cancel_tx->_append_buffered_body('request', 'retained-on-cancel');
@@ -260,6 +273,11 @@ is(
     scalar @{ $cancel_tx->{request_buffered_body} },
     0,
     'transaction cancellation releases buffered receive chunks',
+);
+is(
+    $cancel_tx->{request_buffered_tail},
+    '',
+    'transaction cancellation releases buffered receive slab storage',
 );
 
 my $native_sender = Unblock::HTTP3::_Native->client(
