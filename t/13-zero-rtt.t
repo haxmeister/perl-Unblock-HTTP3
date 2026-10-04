@@ -294,13 +294,31 @@ my $second_server_h3 = h3_server(
 );
 $second_server_h3->start;
 
+is(
+    $second_server_h3->next_transaction,
+    undef,
+    'server does not expose a 0-RTT request before handshake acceptance',
+);
+
+ok(
+    $early_client_tx->send_datagram('early-http-datagram'),
+    'client sends an HTTP Datagram using remembered HTTP/3 and QUIC state',
+);
+
+$early_client_tx->request_body->complete;
+
 my $early_server_tx;
 ok(
     run_until(sub {
+        return 0 unless $second_quic->ready
+            && $second_server_quic->ready
+            && $second_quic->early_data_status eq 'accepted'
+            && $second_client_h3->peer_settings_received;
+
         $early_server_tx ||= $second_server_h3->next_transaction;
         return defined $early_server_tx;
     }),
-    'server parses the HTTP/3 request carried in QUIC 0-RTT',
+    'accepted 0-RTT request becomes application-visible after the handshake',
 );
 
 ok($early_server_tx->early_data,
@@ -308,38 +326,17 @@ ok($early_server_tx->early_data,
 is($early_server_tx->request->target, '/early',
     'server receives the replay-safe early request');
 
-ok(
-    $early_client_tx->send_datagram('early-http-datagram'),
-    'client sends an HTTP Datagram using remembered HTTP/3 and QUIC state',
-);
-
-my $early_datagram;
-ok(
-    run_until(sub {
-        $early_datagram = $early_server_tx->next_datagram;
-        return defined $early_datagram;
-    }),
-    'server receives an HTTP Datagram associated with the 0-RTT request',
-);
-is($early_datagram, 'early-http-datagram',
-    '0-RTT HTTP Datagram payload is preserved');
-
-$early_client_tx->request_body->complete;
-
-ok(
-    run_until(sub {
-        return $second_quic->ready
-            && $second_server_quic->ready
-            && $second_quic->early_data_status eq 'accepted'
-            && $second_client_h3->peer_settings_received;
-    }),
-    '0-RTT handshake is accepted and current HTTP/3 SETTINGS arrive',
-);
-
 ok(!$second_client_h3->failed,
     'current server SETTINGS validate against remembered 0-RTT state');
 ok(!$second_client_h3->using_remembered_peer_settings,
     'current SETTINGS replace the remembered initial view');
+
+my $early_datagram = $early_server_tx->next_datagram;
+is(
+    $early_datagram,
+    'early-http-datagram',
+    'buffered 0-RTT HTTP Datagram is delivered only after handshake acceptance',
+);
 
 $early_server_tx->response->status(204);
 $early_server_tx->send_response;
