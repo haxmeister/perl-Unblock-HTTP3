@@ -6,6 +6,7 @@
 #include <nghttp3/nghttp3.h>
 
 #include <inttypes.h>
+#include <string.h>
 
 #define UNBLOCK_HTTP3_MAX_VARINT UINT64_C(0x3fffffffffffffff)
 
@@ -1564,9 +1565,8 @@ unblock_http3_uniform_trailer_fields(
 }
 
 static void
-unblock_http3_uniform_view(
+unblock_http3_uniform_any_view(
     pTHX_ SV *message,
-    U32 expected_kind,
     uhttp_native_view *view
 )
 {
@@ -1581,6 +1581,19 @@ unblock_http3_uniform_view(
     ) {
         croak("native Uniform fast path requires an exact canonical message");
     }
+}
+
+static void
+unblock_http3_uniform_view(
+    pTHX_ SV *message,
+    U32 expected_kind,
+    uhttp_native_view *view
+)
+{
+    unblock_http3_uniform_any_view(
+        aTHX_ message,
+        view
+    );
 
     if (view->kind != expected_kind) {
         croak("canonical Uniform message has the wrong kind");
@@ -2273,15 +2286,10 @@ uniform_trailer_field_section_size(self, message)
         native = unblock_http3_conn_from_sv(self);
         (void)native;
 
-        if (
-            !uhttp_native_inspect(
-                aTHX_ &MY_CXT.uniform_api,
-                message,
-                &view
-            )
-        ) {
-            croak("native Uniform fast path requires an exact canonical message");
-        }
+        unblock_http3_uniform_any_view(
+            aTHX_ message,
+            &view
+        );
 
         unblock_http3_uniform_validate_section(
             aTHX_ &view.trailers,
