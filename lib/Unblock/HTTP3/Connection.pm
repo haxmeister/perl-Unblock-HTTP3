@@ -3,7 +3,6 @@ package Unblock::HTTP3::Connection;
 use strict;
 use warnings;
 use Carp qw(croak);
-use Uniform::HTTP::FastPath 0.06 ();
 use Uniform::HTTP::Request 0.06 ();
 use Uniform::HTTP::Response 0.06 ();
 use Scalar::Util qw(blessed weaken);
@@ -1916,14 +1915,11 @@ sub _capsule_protocol_response_error {
 sub _assert_capsule_protocol_response {
     my ($response, $operation) = @_;
 
-    my $view = Uniform::HTTP::FastPath::view($response);
-    my $error = _capsule_protocol_response_error(
-        $view->[Uniform::HTTP::FastPath::SLOT_STATUS()],
-        $view->[Uniform::HTTP::FastPath::SLOT_HEADERS()],
-    );
+    my $values = $response->header_values('capsule-protocol');
+    return unless @$values;
+    return if $response->status >= 200 && $response->status < 300;
 
-    croak "$operation: $error" if defined $error;
-    return;
+    croak "$operation: Capsule-Protocol is only valid on a successful HTTP/3 response";
 }
 
 sub _response_content_forbidden_reason {
