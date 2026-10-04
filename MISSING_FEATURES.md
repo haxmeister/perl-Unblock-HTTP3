@@ -19,6 +19,24 @@ Server Push. Revisit this only if the native library gains suitable support.
 Unblock::HTTP3 should not build a second HTTP/3 state machine around libnghttp3
 to add it.
 
+## RFC 9114 malformed-message stream scope
+
+Unblock::HTTP3 rejects malformed HTTP semantics that reach the Perl integration
+layer with H3_MESSAGE_ERROR on the affected request stream.
+
+libnghttp3 1.18.0 can also detect malformed HTTP headers and message framing
+internally. Its `nghttp3_conn_read_stream2()` contract says that any negative
+return is a connection error after which the native connection must not be
+used. This means those native-detected malformed-message cases can close the
+whole HTTP/3 connection even though RFC 9114 specifies a request-stream
+H3_MESSAGE_ERROR.
+
+Current upstream libnghttp3 1.18.90 retains the same API contract. Fixing this
+cleanly requires native-library support for recoverable malformed-message
+stream errors or replacing more of the HTTP/3/QPACK receive state machine.
+Unblock::HTTP3 should not continue using a libnghttp3 connection after an API
+return for which the library documents further use as undefined behavior.
+
 ## RFC 9218 parameter edge semantics
 
 Normal Priority fields and PRIORITY_UPDATE are supported.
