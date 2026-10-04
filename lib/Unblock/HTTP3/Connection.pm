@@ -624,6 +624,21 @@ sub _inspect_peer_settings_bytes {
                 return;
             }
 
+            if (
+                ($setting_id eq '8' || $setting_id eq '51')
+                && $value ne '0'
+                && $value ne '1'
+            ) {
+                $state->{stage} = 'ignore';
+                $state->{buffer} = '';
+
+                $self->_fail_connection(
+                    $H3_SETTINGS_ERROR,
+                    "peer HTTP/3 setting $setting_id must be 0 or 1",
+                );
+                return;
+            }
+
             $state->{settings}{$setting_id} = $value;
             $state->{stage} = 'setting_id';
             next;
