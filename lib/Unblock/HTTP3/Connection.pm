@@ -4249,6 +4249,12 @@ Server only. Advertises Extended CONNECT support.
 Advertises RFC 9297 HTTP Datagram support. The Net::QUIC connection must also
 have QUIC DATAGRAM receive support.
 
+=item C<origins>
+
+Server only. Array reference of RFC 6454 ASCII origin serializations to send in
+the RFC 9412 ORIGIN frame. An empty array sends an explicit empty ORIGIN frame.
+Omit the option to send no ORIGIN frame.
+
 =item C<datagram_request>
 
 Server-only callback used to decide whether an incoming request uses HTTP
@@ -4454,6 +4460,15 @@ the new server SETTINGS frame arrives.
 =head2 peer_settings_received
 
 True after the peer SETTINGS frame has been accepted.
+
+=head2 peer_origins
+
+Returns undef until a complete RFC 9412 ORIGIN frame has been received.
+
+After that, returns a copy of the cumulative valid origin entries advertised by
+the server. An explicit empty ORIGIN frame therefore returns an empty array
+reference rather than undef. Invalid origin entries are ignored as required by
+RFC 8336.
 
 =head2 early_data_status
 
