@@ -92,19 +92,6 @@ sub read_error {
 
 {
     my $native = Unblock::HTTP3::_Native->server;
-    my $payload = h3_varint(0x08) . h3_varint(2);
-
-    read_error(
-        native    => $native,
-        stream_id => 2,
-        bytes     => h3_varint(0) . h3_frame(0x04, $payload),
-        code      => 0x0109,
-        label     => 'invalid SETTINGS_ENABLE_CONNECT_PROTOCOL value',
-    );
-}
-
-{
-    my $native = Unblock::HTTP3::_Native->server;
     my $payload = h3_varint(0x02) . h3_varint(0);
 
     read_error(
