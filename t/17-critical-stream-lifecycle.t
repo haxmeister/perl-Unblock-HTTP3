@@ -257,7 +257,7 @@ sub make_pair {
 
     like(
         $pair->{server_h3}->error,
-        qr/critical HTTP\/3 stream/i,
+        qr/(?:critical HTTP\/3 stream|CLOSED_CRITICAL_STREAM)/i,
         'critical-stream FIN records a useful error',
     );
 
