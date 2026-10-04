@@ -1035,8 +1035,12 @@ created.
 
 =head2 local_reset_code
 
-Returns the RESET_STREAM application error code sent locally for this request
-stream, or undef when none has been sent.
+Returns the RESET_STREAM application error code explicitly requested by the
+local HTTP/3 layer for this request stream, or undef when none was requested.
+
+A peer STOP_SENDING can cause QUIC itself to send the required RESET_STREAM.
+That transport-generated response is not reported here. The peer request is
+reported by L</remote_stop_sending_code>.
 
 =head2 remote_reset_code
 
