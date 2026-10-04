@@ -240,7 +240,7 @@ my $stream_tx = make_tx(
         [ 'content-length', '5' ],
     ],
 );
-$stream_tx->response->_begin_stream_body;
+$stream_tx->_enable_response_streaming;
 
 is(
     $server->_assert_incremental_content_length(
@@ -277,7 +277,7 @@ my $short_tx = make_tx(
         [ 'content-length', '5' ],
     ],
 );
-$short_tx->response->_begin_stream_body;
+$short_tx->_enable_response_streaming;
 
 like(
     dies {

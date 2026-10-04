@@ -2,214 +2,167 @@ use strict;
 use warnings;
 
 use Test2::V0;
+use Uniform::HTTP 0.04;
 use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 
 use Unblock::HTTP3::Request;
 use Unblock::HTTP3::Response;
 
-my @message_methods = qw(
-    version header header_values header_count header_name header_value
-    add_header remove_header body has_buffered_body is_complete is_mutable
-    headers_are_lossless
-);
+is($Uniform::HTTP::VERSION, '0.04',
+    'Unblock HTTP3 contract tests use Uniform HTTP 0.04');
 
-my @transport_methods = qw(
-    send write respond receive parse serialize socket connection transaction
-    stream pause resume drain cancel retry redirect
-);
-
-for my $class (qw(Unblock::HTTP3::Request Unblock::HTTP3::Response)) {
-    for my $method (@message_methods) {
-        ok($class->can($method), "$class provides Uniform method $method");
-    }
-
-    for my $method (@transport_methods) {
-        ok(!$class->can($method),
-            "$class does not own transport method $method");
-    }
-}
-
-my $uniform_request = Uniform::HTTP::Request->new(
-    method  => 'POST',
-    target  => '/items?draft=1',
-    version => '3',
-    headers => [
-        [ 'X-First', 'one' ],
-        [ 'X-Test',  'one' ],
-        [ 'x-test',  'two' ],
-        [ 'X-Last',  'four' ],
-    ],
-    body => '',
-);
-
-my $http3_request = Unblock::HTTP3::Request->new(
-    method    => 'POST',
-    target    => '/items?draft=1',
+my $request = Unblock::HTTP3::Request->new(
+    method    => 'CONNECT',
+    target    => '/chat',
     scheme    => 'https',
     authority => 'example.com',
-    version   => '3',
+    protocol  => 'webtransport',
     headers   => [
         [ 'X-First', 'one' ],
         [ 'X-Test',  'one' ],
         [ 'x-test',  'two' ],
-        [ 'X-Last',  'four' ],
     ],
-    body => '',
-);
-
-for my $method (qw(method target version body header_count)) {
-    is(
-        $http3_request->$method(),
-        $uniform_request->$method(),
-        "request $method follows Uniform behavior",
-    );
-}
-
-is(
-    $http3_request->header('X-TEST'),
-    $uniform_request->header('X-TEST'),
-    'request header lookup is case insensitive',
-);
-
-is(
-    $http3_request->header_values('x-test'),
-    $uniform_request->header_values('x-test'),
-    'request repeated headers preserve values in order',
-);
-
-is(
-    [ map { $http3_request->header_name($_) }
-        0 .. $http3_request->header_count - 1 ],
-    [ map { $uniform_request->header_name($_) }
-        0 .. $uniform_request->header_count - 1 ],
-    'request preserves header occurrence order and spelling',
-);
-
-is($http3_request->header_name(50), undef,
-    'request out-of-range header index returns undef');
-ok($http3_request->target_is_exact, 'request target is exact');
-ok($http3_request->headers_are_lossless, 'request headers are lossless');
-ok($http3_request->has_buffered_body,
-    'empty request body is still a buffered body');
-is($http3_request->body, '', 'empty request body is retained');
-ok($http3_request->is_complete, 'constructed request is complete');
-ok($http3_request->is_mutable, 'constructed request is mutable');
-
-is($http3_request->method('PATCH'), $http3_request,
-    'request method setter is chainable');
-is($http3_request->method, 'PATCH', 'request method setter changes method');
-is($http3_request->target('*'), $http3_request,
-    'request target setter is chainable');
-is($http3_request->target, '*', 'asterisk request target is accepted');
-
-is($http3_request->header('X-Test', 'replacement'), $http3_request,
-    'request header setter is chainable');
-is(
-    $http3_request->header_values('x-test'),
-    ['replacement'],
-    'request header setter replaces every matching occurrence',
-);
-is(
-    [ map { $http3_request->header_name($_) }
-        0 .. $http3_request->header_count - 1 ],
-    [ 'X-First', 'X-Test', 'X-Last' ],
-    'replacement occupies the first matching header position',
-);
-
-is($http3_request->add_header('X-First', 'two'), $http3_request,
-    'request add_header is chainable');
-is(
-    $http3_request->header_values('x-first'),
-    [ 'one', 'two' ],
-    'request add_header appends a duplicate occurrence',
-);
-is($http3_request->remove_header('X-FIRST'), $http3_request,
-    'request remove_header is chainable');
-is($http3_request->header_values('x-first'), [],
-    'request remove_header removes every occurrence');
-
-is($http3_request->version(2), $http3_request,
-    'request version setter is chainable');
-is($http3_request->version, '2', 'numeric request version becomes bytes');
-is($http3_request->version(undef), $http3_request,
-    'request version can be cleared');
-is($http3_request->version, undef, 'cleared request version is undef');
-
-is($http3_request->scheme, 'https', 'request exposes HTTP/3 scheme');
-is($http3_request->authority, 'example.com',
-    'request exposes HTTP/3 authority');
-
-my $request_without_body = Unblock::HTTP3::Request->new(
-    method => 'GET',
-    target => '/',
-);
-
-ok(!$request_without_body->has_buffered_body,
-    'omitted request body has no buffer');
-is($request_without_body->body, undef,
-    'omitted request body returns undef');
-is($request_without_body->body('bytes'), $request_without_body,
-    'request body setter is chainable');
-ok($request_without_body->has_buffered_body,
-    'request body setter installs a buffer');
-
-my $uniform_response = Uniform::HTTP::Response->new(
-    status  => 204,
-    version => '3',
-    headers => [
-        [ 'X-Test', 'yes' ],
+    trailers => [
+        [ 'X-Trailer', 'one' ],
+        [ 'x-trailer', 'two' ],
     ],
+    priority => {
+        urgency     => 2,
+        incremental => 1,
+    },
 );
 
-my $http3_response = Unblock::HTTP3::Response->new(
-    status  => 204,
-    version => '3',
-    headers => [
-        [ 'X-Test', 'yes' ],
-    ],
+isa_ok($request, ['Unblock::HTTP3::Request']);
+isa_ok($request, ['Uniform::HTTP::Request']);
+isa_ok($request, ['Uniform::HTTP::Message']);
+
+is($request->method, 'CONNECT', 'Uniform method is inherited');
+is($request->target, '/chat', 'Uniform target is inherited');
+is($request->scheme, 'https', 'Uniform scheme is inherited');
+is($request->authority, 'example.com', 'Uniform authority is inherited');
+is($request->protocol, 'webtransport',
+    'Uniform Extended CONNECT protocol metadata is inherited');
+ok($request->target_is_exact, 'canonical target remains exact');
+
+is($request->header_values('x-test'), ['one', 'two'],
+    'Uniform duplicate header behavior is inherited');
+is(
+    [ map { $request->header_name($_) } 0 .. $request->header_count - 1 ],
+    [ 'X-First', 'X-Test', 'x-test', 'Priority' ],
+    'Uniform header order and spelling are preserved with Priority convenience',
+);
+ok($request->headers_are_lossless, 'request headers are lossless');
+
+is($request->trailer_values('X-TRAILER'), ['one', 'two'],
+    'Uniform trailer behavior is inherited');
+is($request->trailer_count, 2, 'Uniform trailer count is inherited');
+ok($request->has_trailers, 'Uniform trailer presence is inherited');
+ok($request->trailers_are_lossless, 'request trailers are lossless');
+
+is(
+    $request->priority,
+    {
+        urgency     => 2,
+        incremental => 1,
+    },
+    'Unblock priority helper is layered over the Uniform Priority field',
 );
 
-for my $method (qw(status version header_count)) {
-    is(
-        $http3_response->$method(),
-        $uniform_response->$method(),
-        "response $method follows Uniform behavior",
-    );
-}
+$request->mark_incomplete;
+$request->freeze_initial;
 
-is($http3_response->reason, undef,
-    'HTTP/3 response does not synthesize a reason phrase');
-is($http3_response->status(299), $http3_response,
-    'response status setter is chainable');
-is($http3_response->status, 299, 'response status setter changes status');
-is($http3_response->reason('Custom'), $http3_response,
-    'response reason setter is chainable');
-is($http3_response->reason, 'Custom',
-    'response reason is retained for cross-version use');
-is($http3_response->reason(undef), $http3_response,
-    'response reason can be cleared');
-is($http3_response->reason, undef, 'cleared response reason is undef');
-ok($http3_response->headers_are_lossless, 'response headers are lossless');
-ok(!$http3_response->has_buffered_body,
-    'response with omitted body has no body buffer');
-ok($http3_response->is_complete, 'constructed response is complete');
-ok($http3_response->is_mutable, 'constructed response is mutable');
+ok(!$request->is_complete,
+    'Uniform completeness remains independent of initial section freeze');
+ok(!$request->initial_is_mutable,
+    'Uniform initial message section can be frozen independently');
+ok($request->trailers_are_mutable,
+    'Uniform trailers remain mutable after initial freeze');
+ok($request->body_is_mutable,
+    'Uniform buffered body remains mutable after initial freeze');
 
-my $immutable = Unblock::HTTP3::Response->new(
-    status  => 200,
-    headers => [ [ 'X-Test', 'before' ] ],
-);
-
-$immutable->_commit;
-
-ok(!$immutable->is_mutable, 'committed response is immutable');
 like(
-    dies { $immutable->header('X-Test', 'after') },
-    qr/message is immutable/,
-    'immutable response rejects header mutation',
+    dies { $request->header('X-New', 'no') },
+    qr/initial message data is immutable/,
+    'initial header mutation is blocked after freeze_initial',
 );
-is($immutable->header('X-Test'), 'before',
-    'failed immutable mutation changes nothing');
+
+is($request->add_trailer('X-Late', 'yes'), $request,
+    'trailers may still advance after initial fields are fixed');
+
+$request->freeze_trailers;
+ok(!$request->trailers_are_mutable,
+    'Uniform trailer section can be frozen independently');
+
+like(
+    dies { $request->add_trailer('X-Too-Late', 'no') },
+    qr/trailers are immutable/,
+    'trailer mutation is blocked after freeze_trailers',
+);
+
+$request->mark_complete;
+ok($request->is_complete,
+    'Uniform completeness can advance after section freezes');
+
+my $neutral = Unblock::HTTP3::Request->new(
+    method   => 'GET',
+    target   => '/',
+    protocol => 'future-protocol',
+);
+
+is($neutral->protocol, 'future-protocol',
+    'Uniform keeps protocol metadata neutral until an HTTP sender validates it');
+is($neutral->method('CONNECT'), $neutral,
+    'Uniform request fields remain independently editable before commitment');
+is($neutral->method, 'CONNECT', 'method mutation is inherited from Uniform');
+
+my $response = Unblock::HTTP3::Response->new(
+    status  => 200,
+    headers => [ [ 'X-Test', 'yes' ] ],
+    trailers => [
+        [ 'Content-Digest', 'sha-256=:abc:' ],
+    ],
+);
+
+isa_ok($response, ['Unblock::HTTP3::Response']);
+isa_ok($response, ['Uniform::HTTP::Response']);
+isa_ok($response, ['Uniform::HTTP::Message']);
+is($response->status, 200, 'Uniform response status is inherited');
+is($response->reason, undef,
+    'HTTP3 response does not invent a reason phrase');
+is($response->trailer('content-digest'), 'sha-256=:abc:',
+    'Uniform response trailers are directly available');
+
+$response->freeze;
+ok(!$response->is_mutable, 'full Uniform freeze makes response immutable');
+like(
+    dies { $response->status(404) },
+    qr/message is immutable/,
+    'Uniform response mutation fails after full freeze',
+);
+
+my $aborted = Unblock::HTTP3::Response->new(status => 200);
+$aborted->_mark_reset(0x10c);
+is($aborted->reset_code, 0x10c,
+    'Unblock response retains HTTP3 reset diagnostics');
+ok($aborted->is_aborted, 'HTTP3 reset marks response aborted');
+ok(!$aborted->is_complete,
+    'aborted HTTP3 response is incomplete under Uniform completeness');
+ok(!$aborted->is_mutable,
+    'aborted HTTP3 response is frozen');
+
+for my $class (qw(Unblock::HTTP3::Request Unblock::HTTP3::Response)) {
+    for my $method (qw(
+        version header header_values header_count header_name header_value
+        add_header remove_header trailer trailer_values trailer_count
+        trailer_name trailer_value add_trailer remove_trailer has_trailers
+        body has_buffered_body is_complete is_mutable initial_is_mutable
+        body_is_mutable trailers_are_mutable headers_are_lossless
+        trailers_are_lossless freeze freeze_initial freeze_trailers
+        mark_incomplete mark_complete
+    )) {
+        ok($class->can($method), "$class inherits Uniform method $method");
+    }
+}
 
 done_testing;

@@ -157,23 +157,19 @@ like(
     'Extended CONNECT protocol must be an HTTP token',
 );
 
-like(
-    dies {
-        Unblock::HTTP3::Request->new(
-            method   => 'GET',
-            protocol => 'test-protocol',
-            target   => '/',
-        );
-    },
-    qr/protocol is only valid with CONNECT/,
-    'protocol is rejected on a non-CONNECT Request',
+my $neutral_protocol_request = Unblock::HTTP3::Request->new(
+    method   => 'GET',
+    protocol => 'test-protocol',
+    target   => '/',
 );
 
-like(
-    dies { $extended_request->method('GET') },
-    qr/cannot change away from CONNECT/,
-    'Request cannot retain protocol while changing away from CONNECT',
-);
+is($neutral_protocol_request->protocol, 'test-protocol',
+    'Uniform Request preserves protocol metadata before sender validation');
+
+is($extended_request->method('GET'), $extended_request,
+    'Uniform Request permits independent method mutation before sending');
+is($extended_request->protocol, 'test-protocol',
+    'method mutation does not rewrite protocol metadata');
 
 is(
     Unblock::HTTP3::Connection::_request_semantic_error(

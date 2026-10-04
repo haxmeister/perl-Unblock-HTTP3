@@ -1208,8 +1208,8 @@ like(
 
 ok($unnegotiated_extended->is_mutable,
     'failed capability check does not commit the Request');
-ok(!$unnegotiated_extended->_has_incremental_body,
-    'failed capability check does not mutate the Request body mode');
+ok($unnegotiated_extended->is_complete,
+    'failed capability check does not start external streaming state');
 
 $client_h3->{peer_enable_connect_protocol} = 1;
 
