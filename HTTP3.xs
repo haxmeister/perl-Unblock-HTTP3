@@ -36,15 +36,546 @@ typedef struct unblock_http3_body {
 } unblock_http3_body;
 
 typedef struct {
+    uint8_t *name;
+    size_t namelen;
+    uint8_t *value;
+    size_t valuelen;
+} unblock_http3_captured_field;
+
+typedef struct unblock_http3_header_block {
+    int64_t stream_id;
+    unblock_http3_captured_field *fields;
+    size_t count;
+    size_t capacity;
+    size_t field_section_size;
+    struct unblock_http3_header_block *next;
+} unblock_http3_header_block;
+
+typedef struct {
     nghttp3_conn *conn;
     AV *events;
     uint8_t *origin_list_data;
     nghttp3_vec origin_list;
     unblock_http3_body *bodies;
+    unblock_http3_header_block *header_blocks;
     size_t streaming_retained_bytes;
     int is_server;
     int fatal;
 } unblock_http3_native_conn;
+
+
+static void
+unblock_http3_header_block_free(unblock_http3_header_block *block)
+{
+    size_t i;
+
+    if (block == NULL) {
+        return;
+    }
+
+    if (block->fields != NULL) {
+        for (i = 0; i < block->count; ++i) {
+            if (block->fields[i].name != NULL) {
+                Safefree(block->fields[i].name);
+            }
+            if (block->fields[i].value != NULL) {
+                Safefree(block->fields[i].value);
+            }
+        }
+
+        Safefree(block->fields);
+    }
+
+    Safefree(block);
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_find(
+    unblock_http3_native_conn *native,
+    int64_t stream_id
+)
+{
+    unblock_http3_header_block *block;
+
+    for (
+        block = native->header_blocks;
+        block != NULL;
+        block = block->next
+    ) {
+        if (block->stream_id == stream_id) {
+            return block;
+        }
+    }
+
+    return NULL;
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_create(
+    unblock_http3_native_conn *native,
+    int64_t stream_id
+)
+{
+    unblock_http3_header_block *block;
+
+    if (unblock_http3_header_block_find(native, stream_id) != NULL) {
+        croak("HTTP/3 stream already has an active header block");
+    }
+
+    Newxz(block, 1, unblock_http3_header_block);
+    block->stream_id = stream_id;
+    block->next = native->header_blocks;
+    native->header_blocks = block;
+
+    return block;
+}
+
+static void
+unblock_http3_header_block_append(
+    unblock_http3_header_block *block,
+    const uint8_t *name,
+    size_t namelen,
+    const uint8_t *value,
+    size_t valuelen
+)
+{
+    unblock_http3_captured_field *field;
+    size_t next_size;
+
+    if (block == NULL) {
+        croak("HTTP/3 header arrived without an active header block");
+    }
+
+    if (block->count == block->capacity) {
+        size_t capacity = block->capacity == 0
+            ? 8
+            : block->capacity * 2;
+
+        if (capacity < block->capacity) {
+            croak("HTTP/3 header block capacity overflow");
+        }
+
+        if (block->fields == NULL) {
+            Newxz(
+                block->fields,
+                capacity,
+                unblock_http3_captured_field
+            );
+        } else {
+            size_t old_capacity = block->capacity;
+
+            Renew(
+                block->fields,
+                capacity,
+                unblock_http3_captured_field
+            );
+            Zero(
+                block->fields + old_capacity,
+                capacity - old_capacity,
+                unblock_http3_captured_field
+            );
+        }
+
+        block->capacity = capacity;
+    }
+
+    field = &block->fields[block->count];
+
+    Newx(field->name, namelen ? namelen : 1, uint8_t);
+    Newx(field->value, valuelen ? valuelen : 1, uint8_t);
+
+    if (namelen) {
+        Copy(name, field->name, namelen, uint8_t);
+    }
+
+    if (valuelen) {
+        Copy(value, field->value, valuelen, uint8_t);
+    }
+
+    field->namelen = namelen;
+    field->valuelen = valuelen;
+    ++block->count;
+
+    if (
+        block->field_section_size > (size_t)-1 - namelen
+        || block->field_section_size + namelen > (size_t)-1 - valuelen
+        || block->field_section_size + namelen + valuelen > (size_t)-1 - 32
+    ) {
+        croak("HTTP/3 field section size overflow");
+    }
+
+    next_size =
+        block->field_section_size
+        + namelen
+        + valuelen
+        + 32;
+    block->field_section_size = next_size;
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_remove(
+    unblock_http3_native_conn *native,
+    int64_t stream_id
+)
+{
+    unblock_http3_header_block **link = &native->header_blocks;
+
+    while (*link != NULL) {
+        unblock_http3_header_block *block = *link;
+
+        if (block->stream_id != stream_id) {
+            link = &block->next;
+            continue;
+        }
+
+        *link = block->next;
+        block->next = NULL;
+        return block;
+    }
+
+    return NULL;
+}
+
+static void
+unblock_http3_header_block_free_all(
+    unblock_http3_native_conn *native
+)
+{
+    unblock_http3_header_block *block = native->header_blocks;
+
+    while (block != NULL) {
+        unblock_http3_header_block *next = block->next;
+        unblock_http3_header_block_free(block);
+        block = next;
+    }
+
+    native->header_blocks = NULL;
+}
+
+static SV *
+unblock_http3_bless_header_block(
+    unblock_http3_header_block *block
+)
+{
+    SV *inner = newSViv(PTR2IV(block));
+    SV *rv = newRV_noinc(inner);
+
+    sv_bless(
+        rv,
+        gv_stashpv(
+            "Unblock::HTTP3::_Native::HeaderBlock",
+            GV_ADD
+        )
+    );
+
+    return rv;
+}
+
+static unblock_http3_header_block *
+unblock_http3_header_block_from_sv(SV *self)
+{
+    unblock_http3_header_block *block;
+
+    if (!SvROK(self)) {
+        croak("native HTTP/3 header block is not a reference");
+    }
+
+    block = INT2PTR(
+        unblock_http3_header_block *,
+        SvIV(SvRV(self))
+    );
+
+    if (block == NULL) {
+        croak("native HTTP/3 header block has been destroyed");
+    }
+
+    return block;
+}
+
+static int
+unblock_http3_captured_name_equal(
+    const unblock_http3_captured_field *field,
+    const char *name,
+    size_t namelen
+)
+{
+    return field->namelen == namelen
+        && memcmp(field->name, name, namelen) == 0;
+}
+
+static int
+unblock_http3_captured_name_equal_ci(
+    const unblock_http3_captured_field *field,
+    const char *name,
+    size_t namelen
+)
+{
+    size_t i;
+
+    if (field->namelen != namelen) {
+        return 0;
+    }
+
+    for (i = 0; i < namelen; ++i) {
+        uint8_t left = field->name[i];
+        uint8_t right = (uint8_t)name[i];
+
+        if (left >= 'A' && left <= 'Z') {
+            left = (uint8_t)(left + ('a' - 'A'));
+        }
+
+        if (right >= 'A' && right <= 'Z') {
+            right = (uint8_t)(right + ('a' - 'A'));
+        }
+
+        if (left != right) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static const unblock_http3_captured_field *
+unblock_http3_header_block_pseudo(
+    const unblock_http3_header_block *block,
+    const char *name,
+    size_t namelen
+)
+{
+    const unblock_http3_captured_field *found = NULL;
+    size_t i;
+
+    for (i = 0; i < block->count; ++i) {
+        if (
+            unblock_http3_captured_name_equal(
+                &block->fields[i],
+                name,
+                namelen
+            )
+        ) {
+            found = &block->fields[i];
+        }
+    }
+
+    return found;
+}
+
+static size_t
+unblock_http3_header_block_regular_count(
+    const unblock_http3_header_block *block
+)
+{
+    size_t i;
+    size_t count = 0;
+
+    for (i = 0; i < block->count; ++i) {
+        if (
+            block->fields[i].namelen == 0
+            || block->fields[i].name[0] != ':'
+        ) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+static void
+unblock_http3_header_block_uniform_fields(
+    pTHX_ const unblock_http3_header_block *block,
+    uhttp_native_field **pfields,
+    Size_t *pcount,
+    uint8_t **pcookie
+)
+{
+    size_t regular_count =
+        unblock_http3_header_block_regular_count(block);
+    size_t cookie_count = 0;
+    size_t cookie_length = 0;
+    size_t first_cookie = (size_t)-1;
+    size_t i;
+    size_t out_index = 0;
+    uhttp_native_field *fields = NULL;
+    uint8_t *cookie = NULL;
+
+    for (i = 0; i < block->count; ++i) {
+        const unblock_http3_captured_field *field =
+            &block->fields[i];
+
+        if (
+            field->namelen != 0
+            && field->name[0] == ':'
+        ) {
+            continue;
+        }
+
+        if (
+            unblock_http3_captured_name_equal_ci(
+                field,
+                "cookie",
+                6
+            )
+        ) {
+            if (first_cookie == (size_t)-1) {
+                first_cookie = i;
+            }
+
+            if (
+                cookie_length > (size_t)-1 - field->valuelen
+                || (
+                    cookie_count != 0
+                    && cookie_length + field->valuelen
+                        > (size_t)-1 - 2
+                )
+            ) {
+                croak("HTTP/3 Cookie field coalescing overflow");
+            }
+
+            cookie_length += field->valuelen;
+            if (cookie_count != 0) {
+                cookie_length += 2;
+            }
+            ++cookie_count;
+        }
+    }
+
+    if (cookie_count > 1) {
+        regular_count -= cookie_count - 1;
+        Newx(cookie, cookie_length ? cookie_length : 1, uint8_t);
+    }
+
+    if (regular_count != 0) {
+        Newxz(fields, regular_count, uhttp_native_field);
+    }
+
+    if (cookie_count > 1) {
+        size_t cookie_offset = 0;
+
+        for (i = 0; i < block->count; ++i) {
+            const unblock_http3_captured_field *field =
+                &block->fields[i];
+
+            if (
+                !unblock_http3_captured_name_equal_ci(
+                    field,
+                    "cookie",
+                    6
+                )
+            ) {
+                continue;
+            }
+
+            if (cookie_offset != 0) {
+                cookie[cookie_offset++] = ';';
+                cookie[cookie_offset++] = ' ';
+            }
+
+            if (field->valuelen) {
+                Copy(
+                    field->value,
+                    cookie + cookie_offset,
+                    field->valuelen,
+                    uint8_t
+                );
+                cookie_offset += field->valuelen;
+            }
+        }
+    }
+
+    for (i = 0; i < block->count; ++i) {
+        const unblock_http3_captured_field *field =
+            &block->fields[i];
+
+        if (
+            field->namelen != 0
+            && field->name[0] == ':'
+        ) {
+            continue;
+        }
+
+        if (
+            cookie_count > 1
+            && unblock_http3_captured_name_equal_ci(
+                field,
+                "cookie",
+                6
+            )
+        ) {
+            if (i != first_cookie) {
+                continue;
+            }
+
+            fields[out_index].name.data = "cookie";
+            fields[out_index].name.len = 6;
+            fields[out_index].value.data =
+                (const char *)cookie;
+            fields[out_index].value.len =
+                (STRLEN)cookie_length;
+            ++out_index;
+            continue;
+        }
+
+        fields[out_index].name.data =
+            (const char *)field->name;
+        fields[out_index].name.len =
+            (STRLEN)field->namelen;
+        fields[out_index].value.data =
+            (const char *)field->value;
+        fields[out_index].value.len =
+            (STRLEN)field->valuelen;
+        ++out_index;
+    }
+
+    *pfields = fields;
+    *pcount = (Size_t)regular_count;
+    *pcookie = cookie;
+}
+
+static uhttp_native_bytes
+unblock_http3_uniform_bytes_from_sv(SV *value)
+{
+    uhttp_native_bytes bytes;
+    STRLEN len;
+    const char *data;
+
+    if (value == NULL || !SvOK(value)) {
+        bytes.data = NULL;
+        bytes.len = 0;
+        return bytes;
+    }
+
+    data = SvPVbyte(value, len);
+    bytes.data = data;
+    bytes.len = len;
+    return bytes;
+}
+
+static U32
+unblock_http3_received_uniform_flags(
+    U32 kind,
+    int fin
+)
+{
+    U32 flags =
+        UHTTP_HEADERS_LOSSLESS
+        | UHTTP_TRAILERS_LOSSLESS;
+
+    if (kind == UHTTP_KIND_REQUEST) {
+        flags |= UHTTP_TARGET_EXACT;
+    }
+
+    if (fin) {
+        flags |= UHTTP_COMPLETE;
+    } else {
+        flags |=
+            UHTTP_MUTABLE
+            | UHTTP_BODY_MUTABLE
+            | UHTTP_TRAILERS_MUTABLE;
+    }
+
+    return flags;
+}
 
 static void
 unblock_http3_fail(const char *operation, int rv)
