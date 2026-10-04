@@ -12,7 +12,7 @@ use Uniform::HTTP::Response 0.05 ();
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::_Native ();
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
 my $BUFFERED_BODY_RETAIN_BYTES = 16_384;
