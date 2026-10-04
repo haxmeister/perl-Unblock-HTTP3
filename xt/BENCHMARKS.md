@@ -33,6 +33,12 @@ time and HTTP/3 SETTINGS startup are excluded from the timed interval.
 Reported payload throughput counts response body bytes only. Protocol, QUIC,
 UDP, TLS, and packet overhead remain part of the elapsed time.
 
+The output also reports stream-credit stalls. When the requested application
+concurrency is higher than the peer's currently available QUIC bidirectional
+stream credit, Unblock::HTTP3::Connection->request returns undef. The benchmark
+treats that as backpressure, services the connection, and retries after stream
+credit is returned.
+
 ## What this baseline is for
 
 Use this benchmark before and after performance changes. It gives us a stable
