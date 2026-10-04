@@ -1,16 +1,11 @@
 Changes
-CONTRIBUTING.md
 HTTP3.xs
 LICENSE
 MANIFEST
 MANIFEST.SKIP
-MISSING_FEATURES.md
 Makefile.PL
 README.md
-SECURITY.md
 docs/ARCHITECTURE.md
-docs/INTEROPERABILITY.md
-docs/RELEASE-0.01.md
 lib/Unblock/HTTP3.pm
 lib/Unblock/HTTP3/Body/Reader.pm
 lib/Unblock/HTTP3/Body/Stream.pm
@@ -40,4 +35,3 @@ t/10-priority.t
 t/11-http-datagram.t
 t/12-settings-state.t
 t/13-zero-rtt.t
-xt/interop-public.t

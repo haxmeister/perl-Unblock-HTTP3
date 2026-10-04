@@ -11,3 +11,8 @@
 ^HTTP3\.bs$
 ^pm_to_blib$
 ^Unblock-HTTP3-.*\.tar\.gz$
+^CONTRIBUTING\.md$
+^SECURITY\.md$
+^MISSING_FEATURES\.md$
+^docs/(?:INTEROPERABILITY|RELEASE-0\.01)\.md$
+^xt(?:/|$)

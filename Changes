@@ -68,5 +68,7 @@ Revision history for Unblock-HTTP3
     - Simplify README and public POD into the standard practical CPAN format.
     - Add consistent SYNOPSIS, METHODS, SEE ALSO, AUTHOR, and LICENSE sections
       across the public API documentation.
+    - Keep repository-only planning, release, contribution, security, and
+      public-network test material out of the CPAN distribution.
     - Add public interoperability tests against Cloudflare and LiteSpeed HTTP/3
       servers, with Google retained as a diagnostic target.
