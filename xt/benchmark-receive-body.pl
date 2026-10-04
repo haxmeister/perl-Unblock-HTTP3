@@ -86,7 +86,8 @@ sub measure_buffered_cycle {
     my $transaction = bless {
         response                 => $response,
         response_receive_mode    => 'buffered',
-        response_buffered_body   => '',
+        response_buffered_body   => [],
+        response_buffered_bytes  => 0,
         response_buffered_seen   => 0,
     }, 'Unblock::HTTP3::Transaction';
 
@@ -293,8 +294,9 @@ for my $size (@sizes) {
         unless $native_sink == $size * $iterations;
 
     my $buffered = bless {
-        response_buffered_body => '',
-        response_buffered_seen => 0,
+        response_buffered_body  => [],
+        response_buffered_bytes => 0,
+        response_buffered_seen  => 0,
     }, 'Unblock::HTTP3::Transaction';
 
     measure_bytes(
@@ -310,7 +312,7 @@ for my $size (@sizes) {
     );
 
     die "buffered accumulation byte count failed\n"
-        unless length($buffered->{response_buffered_body})
+        unless $buffered->_buffered_body_bytes('response')
             == $size * $iterations;
 
     measure_buffered_cycle(
@@ -339,7 +341,7 @@ for my $size (@sizes) {
         $size,
         $iterations,
         sub {
-            $reader->_push($body);
+            $reader->_push_owned($body);
 
             my $chunk = $reader->next_chunk;
             die "Body::Reader benchmark lost a chunk\n"
@@ -370,7 +372,7 @@ for my $size (@sizes) {
         $size,
         $iterations,
         sub {
-            $callback_reader->_push($body);
+            $callback_reader->_push_owned($body);
         },
     );
 
@@ -392,8 +394,9 @@ for my $size (@sizes) {
             my $transaction = bless {
                 response              => $response,
                 response_receive_mode => 'buffered',
-                response_buffered_body => $body,
-                response_buffered_seen => 1,
+                response_buffered_body  => [ $body ],
+                response_buffered_bytes => length($body),
+                response_buffered_seen  => 1,
             }, 'Unblock::HTTP3::Transaction';
 
             $transaction->_finish_received_message('response');
