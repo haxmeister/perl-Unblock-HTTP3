@@ -1,5 +1,15 @@
 Revision history for Unblock-HTTP3
 
+Next
+    - Require Uniform::HTTP 0.06 for its header-only native FastPath ABI.
+    - Inspect canonical outgoing Request and Response objects directly in XS,
+      avoiding Perl FastPath views and temporary HTTP/3 wire-field arrays.
+    - Retain decoded nghttp3 header blocks in native connection state and build
+      exact canonical Uniform messages directly from validated native byte spans.
+    - Preserve HTTP/3 semantic validation, Cookie coalescing, field-section
+      limits, message lifecycle state, and canonical Uniform object ownership.
+    - Add native-path loopback coverage and HTTP-layer microbenchmarks.
+
 0.02  2026-10-04
     - Require Uniform::HTTP 0.05 and use exact canonical Uniform::HTTP::Request
       and Uniform::HTTP::Response objects throughout the public HTTP message API.
