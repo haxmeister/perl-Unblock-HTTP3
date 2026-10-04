@@ -327,6 +327,12 @@ my $tx = $h3->request(
 0-RTT can be replayed. Unblock::HTTP3 does not automatically retry an early
 request if QUIC rejects it.
 
+On the server, early request bytes can be parsed before the handshake finishes,
+but the Transaction is not exposed to application code until QUIC accepts the
+early data and the handshake completes. Early HTTP Datagrams are bounded and
+held with the Transaction until that point. This is the safe default required
+by the HTTP early-data replay rules.
+
 See `Unblock::HTTP3::Connection` and `docs/ARCHITECTURE.md` for the complete
 SETTINGS persistence rules.
 
