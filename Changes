@@ -22,6 +22,8 @@ Revision history for Unblock-HTTP3
       and Transaction objects; subclasses and adapters use the portable path.
     - Normalize NativeABI discovery around definition(), native_include_dir(),
       header_path(), and c_header().
+    - Add staged-install coverage that verifies the public NativeABI header is
+      installed and compiles for an external C consumer.
     - Keep HTTP/3-specific Datagrams, Capsules, Extended CONNECT, priorities,
       QPACK, 0-RTT, RESET_STREAM, and STOP_SENDING APIs protocol-specific.
     - Jump from 0.03 to 0.10 to make the intentional public API break obvious.
