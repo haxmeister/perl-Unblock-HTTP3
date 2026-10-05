@@ -113,9 +113,10 @@ Introspection should not leak native structs into the public API.
 
 ## Performance work
 
-Repeatable HTTP/3, body, and loopback benchmarks now exist. The 0.02 work also
-reduced outgoing and incoming body copies and moved canonical Uniform message
-access onto FastPath.
+Repeatable HTTP/3, body, and loopback benchmarks now exist. The 0.02 work
+reduced outgoing and incoming body copies. The 0.03 work moves canonical
+Uniform message handling onto the Uniform::HTTP 0.06 native FastPath and adds a
+public native consumer ABI for XS integrations.
 
 Useful later measurements still include:
 
