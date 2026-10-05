@@ -156,6 +156,7 @@ sub _new {
         response_receive_mode    => 'buffered',
         request_receive_options  => {},
         response_receive_options => {},
+        request_end_callback_called => 0,
         request_streaming         => $request_streaming,
         early_data                => $early_data,
         response_streaming        => 0,
@@ -823,6 +824,10 @@ sub _consume_received_body {
 sub _received_body_complete {
     my ($self, $kind) = @_;
 
+    $self->_invoke_request_end
+        if $kind eq 'request'
+            && $self->{request_receive_mode} eq 'stream';
+
     my $connection = $self->{connection};
     $connection->_maybe_complete_transaction($self->{stream_id})
         if defined $connection;
@@ -994,16 +999,24 @@ sub _finish_received_message {
     $message->freeze;
     $message->mark_complete;
 
-    if (
-        $kind eq 'request'
-        && $self->{request_receive_mode} eq 'buffered'
-    ) {
-        my $result = $self->_invoke(
-            'on_request_end',
-            $message,
-        );
-        die $result unless $result eq '1';
-    }
+    $self->_invoke_request_end
+        if $kind eq 'request'
+            && $self->{request_receive_mode} eq 'buffered';
+
+    return;
+}
+
+sub _invoke_request_end {
+    my ($self) = @_;
+
+    return if $self->{request_end_callback_called};
+    $self->{request_end_callback_called} = 1;
+
+    my $result = $self->_invoke(
+        'on_request_end',
+        $self->{request},
+    );
+    die $result unless $result eq '1';
 
     return;
 }
