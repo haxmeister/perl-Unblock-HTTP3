@@ -189,6 +189,11 @@ ok(
 
 my $client_extension_settings_calls = 0;
 my $server_extension_settings_calls = 0;
+my $server_request_callback_count = 0;
+my $server_request_end_callback_count = 0;
+my $server_error_callback_count = 0;
+my $server_error_callback_code;
+my $server_callback_last_transaction;
 my $client_extension_stream;
 my $client_extension_stream_data = '';
 my $client_extension_stream_ended = 0;
@@ -239,6 +244,23 @@ my $server_h3 = Unblock::HTTP3::Server->new(
     max_field_section_size  => 1024,
     max_buffered_body_bytes => 1024,
     enable_extended_connect => 1,
+    on_request => sub {
+        my ($transaction, $request) = @_;
+        ++$server_request_callback_count;
+        $server_callback_last_transaction = $transaction;
+        return;
+    },
+    on_request_end => sub {
+        my ($transaction, $request) = @_;
+        ++$server_request_end_callback_count;
+        return;
+    },
+    on_error => sub {
+        my ($transaction, $error, $error_code) = @_;
+        ++$server_error_callback_count;
+        $server_error_callback_code = $error_code;
+        return;
+    },
     extension_settings      => {
         4662 => 13,
     },
@@ -2002,6 +2024,126 @@ ok(
     'connection remains usable after H3_MESSAGE_ERROR stream reset',
 );
 
+my @callback_informational;
+my $callback_response_status;
+my $callback_response_body = '';
+my $callback_complete_count = 0;
+my $callback_error_count = 0;
+
+my $callback_request = Uniform::HTTP::Request->new(
+    method    => 'GET',
+    target    => '/callback-api',
+    scheme    => 'https',
+    authority => 'localhost',
+);
+
+my $callback_client_tx = $client_h3->request(
+    $callback_request,
+    on_informational => sub {
+        my ($transaction, $response) = @_;
+        push @callback_informational, $response->status;
+        return;
+    },
+    on_response => sub {
+        my ($transaction, $response) = @_;
+        $callback_response_status = $response->status;
+        return;
+    },
+    on_body => sub {
+        my ($transaction, $response, $bytes) = @_;
+        $callback_response_body .= $bytes;
+        return;
+    },
+    on_complete => sub {
+        my ($transaction) = @_;
+        ++$callback_complete_count;
+        return;
+    },
+    on_error => sub {
+        my ($transaction, $error, $error_code) = @_;
+        ++$callback_error_count;
+        return;
+    },
+);
+
+my $callback_server_tx;
+
+ok(
+    run_until(sub {
+        $callback_server_tx ||= $server_h3->next_transaction;
+        return $callback_server_tx
+            && $callback_server_tx->request->is_complete;
+    }),
+    'server receives callback API request',
+);
+
+is(
+    refaddr($server_callback_last_transaction),
+    refaddr($callback_server_tx),
+    'server on_request receives the public Transaction',
+);
+ok(
+    $server_request_end_callback_count > 0,
+    'server on_request_end runs without changing buffered receive mode',
+);
+
+$callback_server_tx->send_informational(
+    Uniform::HTTP::Response->new(
+        status => 103,
+    ),
+);
+
+$callback_server_tx->respond(
+    Uniform::HTTP::Response->new(
+        status => 200,
+        headers => [
+            [ 'content-type', 'text/plain' ],
+        ],
+    ),
+    stream_body => 1,
+);
+
+ok(
+    $callback_server_tx->write('callback-'),
+    'common Transaction write accepts callback response bytes',
+);
+$callback_server_tx->end('body');
+
+ok(
+    run_until(sub {
+        return $callback_client_tx->is_complete
+            && $callback_server_tx->is_complete
+            && $callback_complete_count == 1;
+    }),
+    'client callback API completes a real HTTP/3 exchange',
+);
+
+is(
+    \@callback_informational,
+    [ 103 ],
+    'client on_informational receives the 1xx response',
+);
+is(
+    $callback_response_status,
+    200,
+    'client on_response receives final response headers',
+);
+is(
+    $callback_response_body,
+    'callback-body',
+    'client on_body receives streamed response bytes',
+);
+is(
+    $callback_complete_count,
+    1,
+    'client on_complete runs once',
+);
+is(
+    $callback_error_count,
+    0,
+    'client on_error does not run on a successful exchange',
+);
+
 my $oversized_request = Uniform::HTTP::Request->new(
     method    => 'POST',
     target    => '/too-large',
@@ -2030,6 +2172,15 @@ like(
     $server_h3->error,
     qr/buffered body exceeds configured limit/,
     'body limit records a useful HTTP/3 error',
+);
+ok(
+    $server_error_callback_count > 0,
+    'server on_error receives HTTP/3 transaction failure',
+);
+is(
+    $server_error_callback_code,
+    0x0107,
+    'server on_error receives the HTTP/3 error code',
 );
 
 close $client_socket;
