@@ -3085,6 +3085,84 @@ _consumer_transaction_probe(transaction)
 
 
 SV *
+_consumer_queue_probe(connection)
+    SV *connection
+    PREINIT:
+        void *context;
+        SV *transaction;
+        SV *informational;
+        SV *error;
+        uint64_t code;
+        int has_code;
+        AV *out;
+    CODE:
+        context = unblock_http3_consumer_operations.create(
+            aTHX_ connection
+        );
+
+        transaction =
+            unblock_http3_consumer_operations.next_transaction(
+                aTHX_ context
+            );
+        informational =
+            unblock_http3_consumer_operations.next_informational(
+                aTHX_ context
+            );
+        has_code =
+            unblock_http3_consumer_operations.error_code(
+                aTHX_ context,
+                &code
+            );
+        error =
+            unblock_http3_consumer_operations.error(
+                aTHX_ context
+            );
+
+        out = newAV();
+        av_push(
+            out,
+            transaction == NULL
+                ? newSV(0)
+                : transaction
+        );
+        av_push(
+            out,
+            informational == NULL
+                ? newSV(0)
+                : informational
+        );
+        av_push(
+            out,
+            newSViv(
+                unblock_http3_consumer_operations.failed(
+                    aTHX_ context
+                )
+            )
+        );
+        av_push(out, newSViv(has_code ? 1 : 0));
+        av_push(
+            out,
+            has_code
+                ? newSVuv((UV)code)
+                : newSV(0)
+        );
+        av_push(
+            out,
+            error == NULL
+                ? newSV(0)
+                : newSVsv(error)
+        );
+
+        unblock_http3_consumer_operations.destroy(
+            aTHX_ context
+        );
+
+        RETVAL = newRV_noinc((SV *)out);
+    OUTPUT:
+        RETVAL
+
+
+SV *
 _parse_priority(value)
     SV *value
     PREINIT:
