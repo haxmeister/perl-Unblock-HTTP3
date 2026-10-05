@@ -45,6 +45,11 @@ Net::QUIC       0.04+
 Uniform::HTTP   0.06+
 ```
 
+Version 0.10 intentionally breaks the earlier 0.03 Perl API. Client and Server
+now use `new()`, final responses use `respond()`, and the old
+`Connection->client()`, `Connection->server()`, and `send_response()`
+entry points are removed. There are no compatibility aliases.
+
 ## Start here
 
 The public API is built around three objects:
