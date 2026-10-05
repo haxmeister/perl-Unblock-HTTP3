@@ -5,7 +5,7 @@ use warnings;
 
 use XSLoader ();
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 XSLoader::load(__PACKAGE__, $VERSION);
 
@@ -76,6 +76,10 @@ One HTTP/3 connection over one Net::QUIC connection.
 
 One HTTP/3 request stream and its response.
 
+=item L<Unblock::HTTP3::NativeABI>
+
+Optional versioned native consumer ABI for XS integrations.
+
 =item L<Uniform::HTTP::Request> and L<Uniform::HTTP::Response>
 
 Canonical HTTP message objects used directly by Unblock::HTTP3.
@@ -92,7 +96,7 @@ Readable incoming body stream.
 
 =head1 SEE ALSO
 
-L<Net::QUIC>, L<Uniform::HTTP>, L<Alien::nghttp3>
+L<Net::QUIC>, L<Uniform::HTTP>, L<Alien::nghttp3>, L<Unblock::HTTP3::NativeABI>
 
 =head1 AUTHOR
 
