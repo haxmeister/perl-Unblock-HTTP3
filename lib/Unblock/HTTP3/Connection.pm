@@ -1551,7 +1551,7 @@ sub request {
     my $is_connect = $request->method eq 'CONNECT' ? 1 : 0;
     my $is_extended_connect =
         $is_connect && defined($request->protocol) ? 1 : 0;
-    my $stream_body;
+    my $stream_body = 0;
     my $receive_body = $self->{receive_body_mode};
     my $receive_options = {};
     my $datagrams = exists $option{datagrams}
@@ -1596,29 +1596,30 @@ sub request {
             if $request->has_trailers;
 
         $receive_body = 'stream';
-        $stream_body = {};
+        $stream_body = 1;
     }
 
     if (exists $option{stream_body}) {
         my $configured = delete $option{stream_body};
 
-        if (!ref($configured) && defined($configured) && "$configured" =~ /\A[01]\z/) {
-            $stream_body = $configured ? {} : undef;
-        } elsif (ref($configured) eq 'HASH') {
-            $stream_body = { %$configured };
-        } else {
-            croak 'request(): stream_body must be 0, 1, or a hash reference';
-        }
+        croak 'request(): stream_body must be zero or one'
+            if !defined($configured)
+                || ref($configured)
+                || "$configured" !~ /\A[01]\z/;
 
-        croak 'request(): stream_body cannot be combined with a buffered Request body'
-            if defined($stream_body) && $request->has_buffered_body;
+        $stream_body = $configured ? 1 : 0;
+
+        croak 'request(): CONNECT requires stream_body => 1'
+            if $is_connect && !$stream_body;
+        croak 'request(): stream_body cannot be combined with a buffered body'
+            if $stream_body && $request->has_buffered_body;
     }
 
     $receive_body = 'stream'
         if defined $callbacks{on_body};
 
     croak 'request(): on_drain requires stream_body'
-        if defined($callbacks{on_drain}) && !defined($stream_body);
+        if defined($callbacks{on_drain}) && !$stream_body;
 
     if (exists $option{receive_body}) {
         my $value = delete $option{receive_body};
@@ -1645,7 +1646,7 @@ sub request {
         $request,
         'request()',
     );
-    my $request_streaming = defined($stream_body) ? 1 : 0;
+    my $request_streaming = $stream_body ? 1 : 0;
 
     $self->_assert_request_content_length(
         $request,
@@ -1711,23 +1712,14 @@ sub request {
 
     $self->{transactions}{$stream_id} = $transaction;
 
-    if (defined $stream_body) {
-        croak 'request(): on_drain supplied twice'
-            if defined($callbacks{on_drain})
-                && exists($stream_body->{on_drain});
-
-        if (
-            defined($callbacks{on_drain})
-            && !exists($stream_body->{on_drain})
-        ) {
-            $stream_body->{on_drain} = sub {
+    if ($stream_body && defined $callbacks{on_drain}) {
+        $transaction->request_body(
+            on_drain => sub {
                 my ($body) = @_;
                 my $result = $transaction->_invoke('on_drain');
                 die $result unless $result eq '1';
-            };
-        }
-
-        $transaction->request_body(%$stream_body);
+            },
+        );
     }
 
     $self->_maybe_complete_transaction($stream_id);
@@ -2139,7 +2131,7 @@ sub _assert_response_message_allowed {
 }
 
 sub _respond_transaction {
-    my ($self, $transaction) = @_;
+    my ($self, $transaction, $response, %option) = @_;
 
     croak 'respond() requires a server HTTP/3 connection'
         unless $self->{role} eq 'server';
@@ -2151,8 +2143,55 @@ sub _respond_transaction {
     croak 'response has already been sent for this Transaction'
         if $self->{response_sent}{ $transaction->stream_id };
 
-    my $response = $transaction->response
-        or croak 'Transaction has no response';
+    $self->_assert_response_contract(
+        $response,
+        'respond()',
+    );
+
+    my $stream_body = exists($option{stream_body})
+        ? delete($option{stream_body})
+        : 0;
+    croak 'respond(): stream_body must be zero or one'
+        if !defined($stream_body)
+            || ref($stream_body)
+            || "$stream_body" !~ /\A[01]\z/;
+    $stream_body = $stream_body ? 1 : 0;
+
+    my $on_drain = delete $option{on_drain};
+    my $on_error = delete $option{on_error};
+
+    croak 'respond(): on_drain must be a coderef'
+        if defined($on_drain) && ref($on_drain) ne 'CODE';
+    croak 'respond(): on_error must be a coderef'
+        if defined($on_error) && ref($on_error) ne 'CODE';
+    croak 'respond(): unknown options: ' . join(', ', sort keys %option)
+        if %option;
+    croak 'respond(): on_drain requires stream_body'
+        if $on_drain && !$stream_body;
+    croak 'respond(): stream_body cannot be combined with a buffered body'
+        if $stream_body && $response->has_buffered_body;
+
+    $transaction->{response} = $response;
+    $transaction->{response_body} = undef;
+    $transaction->{response_streaming} = 0;
+
+    if ($stream_body) {
+        my %stream_option;
+
+        if ($on_drain) {
+            $transaction->_set_callback('on_drain', $on_drain);
+            $stream_option{on_drain} = sub {
+                my ($body) = @_;
+                my $result = $transaction->_invoke('on_drain');
+                die $result unless $result eq '1';
+            };
+        }
+
+        $transaction->response_body(%stream_option);
+    }
+
+    $transaction->_set_callback('on_error', $on_error)
+        if $on_error;
 
     _assert_http3_version($response, 'respond()');
 
@@ -2191,7 +2230,38 @@ sub _respond_transaction {
 
     $transaction->_mark_response_started;
     $self->_maybe_complete_transaction($transaction->stream_id);
-    return $response;
+    return $transaction;
+}
+
+sub _write_stream_body {
+    my ($self, $transaction, $bytes, $final, $operation) = @_;
+
+    croak "$operation(): Transaction does not belong to this HTTP/3 connection"
+        unless blessed($transaction)
+            && $transaction->isa('Unblock::HTTP3::Transaction')
+            && defined($self->{transactions}{ $transaction->stream_id })
+            && $self->{transactions}{ $transaction->stream_id } == $transaction;
+
+    my $body;
+
+    if ($self->{role} eq 'client') {
+        croak "$operation(): Transaction has no streaming Request body"
+            unless $transaction->_request_is_streaming;
+        $body = $transaction->request_body;
+    } else {
+        croak "$operation(): Transaction has no streaming Response body"
+            unless $transaction->_response_is_streaming
+                && $transaction->is_response_started;
+        $body = $transaction->{response_body}
+            or croak "$operation(): Transaction has no streaming Response body";
+    }
+
+    return $final
+        ? do {
+            $body->complete($bytes);
+            1;
+        }
+        : $body->write($bytes);
 }
 
 sub _write_transaction_body {
