@@ -993,6 +993,18 @@ sub _finish_received_message {
     $message->freeze_trailers;
     $message->freeze;
     $message->mark_complete;
+
+    if (
+        $kind eq 'request'
+        && $self->{request_receive_mode} eq 'buffered'
+    ) {
+        my $result = $self->_invoke(
+            'on_request_end',
+            $message,
+        );
+        die $result unless $result eq '1';
+    }
+
     return;
 }
 
