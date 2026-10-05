@@ -52,24 +52,31 @@ ABI version 1 is:
 
     UB_HTTP3_CONSUMER_ABI_VERSION 1
 
+Transaction states are:
+
+    UB_HTTP3_TX_ACTIVE
+    UB_HTTP3_TX_COMPLETE
+    UB_HTTP3_TX_CANCELLED
+    UB_HTTP3_TX_ERROR
+
 ## Connection context
 
-Call C<create> once for each Unblock::HTTP3::Connection.
+Call `create` once for each Unblock::HTTP3::Connection.
 
 Keep that context for the lifetime of the integration rather than creating it
 for every event.
 
-Call C<destroy> when the consumer no longer needs it.
+Call `destroy` when the consumer no longer needs it.
 
 A context belongs to one Perl interpreter and must not be shared across
 ithreads.
 
 ## Transactions and Uniform objects
 
-C<next_transaction> and C<next_informational> return normal
+`next_transaction` and `next_informational` return normal
 Unblock::HTTP3::Transaction objects.
 
-C<transaction_request> and C<transaction_response> expose the exact canonical
+`transaction_request` and `transaction_response` expose the exact canonical
 Uniform::HTTP objects owned by that Transaction.
 
 An XS consumer may pass those message objects directly to the Uniform::HTTP
@@ -99,7 +106,14 @@ unchanged.
 
 ## Request scope
 
-ABI version 1 C<request> uses the normal request defaults.
+ABI version 1 `request` uses the normal request defaults.
+
+`request` returns `NULL` when the normal Perl request path would return
+`undef`, including temporary QUIC bidirectional-stream backpressure.
+
+`next_transaction`, `next_informational`, and
+`transaction_next_informational` return `NULL` when no item is ready.
+`transaction_response` returns `NULL` until a response exists.
 
 Advanced request options such as incremental request-body production,
 streaming response configuration, HTTP Datagram opt-in, and 0-RTT opt-in
