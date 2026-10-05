@@ -4094,7 +4094,6 @@ sub _finish_headers {
 
         my $request_receive_mode = $is_connect
             || defined($self->{callbacks}{on_body})
-            || defined($self->{callbacks}{on_request_end})
             ? 'stream'
             : $self->{receive_body_mode};
 
@@ -4109,10 +4108,11 @@ sub _finish_headers {
                 );
                 die $result unless $result eq '1';
             };
-        } elsif (defined $self->{callbacks}{on_request_end}) {
-            $request_receive_options{on_data} = sub { return };
         }
-        if (defined $self->{callbacks}{on_request_end}) {
+        if (
+            $request_receive_mode eq 'stream'
+            && defined($self->{callbacks}{on_request_end})
+        ) {
             $request_receive_options{on_end} = sub {
                 my ($reader) = @_;
                 my $result = $transaction->_invoke(
