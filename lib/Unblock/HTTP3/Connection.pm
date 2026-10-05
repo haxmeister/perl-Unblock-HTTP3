@@ -4024,6 +4024,8 @@ sub _finish_headers {
                 );
                 die $result unless $result eq '1';
             };
+        } elsif (defined $self->{callbacks}{on_request_end}) {
+            $request_receive_options{on_data} = sub { return };
         }
         if (defined $self->{callbacks}{on_request_end}) {
             $request_receive_options{on_end} = sub {
