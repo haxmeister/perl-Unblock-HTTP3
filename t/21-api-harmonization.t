@@ -135,6 +135,36 @@ like(
     'common response stream_body option is strictly boolean',
 );
 
+my $advanced_client = bless {
+    role => 'client',
+}, 'Unblock::HTTP3::Client';
+
+my $advanced_request = Uniform::HTTP::Request->new(
+    method    => 'POST',
+    target    => '/advanced-body',
+    scheme    => 'https',
+    authority => 'example.test',
+);
+
+my $advanced_transaction = Unblock::HTTP3::Transaction->_new(
+    connection        => $advanced_client,
+    stream_id         => 8,
+    request           => $advanced_request,
+    request_streaming => 1,
+);
+
+my $advanced_body = $advanced_transaction->request_body(
+    on_drain => sub { },
+);
+
+is(
+    $advanced_transaction->request_body(
+        on_cancel => sub { },
+    ),
+    $advanced_body,
+    'advanced Body::Stream callbacks can be configured after common stream_body setup',
+);
+
 ok(
     Unblock::HTTP3::_Native::_consumer_context_probe(
         bless({}, 'Unblock::HTTP3::Client'),
