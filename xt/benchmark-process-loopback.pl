@@ -11,7 +11,6 @@ use Net::QUIC;
 use Net::QUIC::Driver;
 use Unblock::HTTP3;
 use Unblock::HTTP3::Client;
-use Unblock::HTTP3::Connection;
 use Unblock::HTTP3::Server;
 use Uniform::HTTP::Request;
 
