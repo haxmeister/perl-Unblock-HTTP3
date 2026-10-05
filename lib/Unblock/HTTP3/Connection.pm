@@ -4109,20 +4109,6 @@ sub _finish_headers {
                 die $result unless $result eq '1';
             };
         }
-        if (
-            $request_receive_mode eq 'stream'
-            && defined($self->{callbacks}{on_request_end})
-        ) {
-            $request_receive_options{on_end} = sub {
-                my ($reader) = @_;
-                my $result = $transaction->_invoke(
-                    'on_request_end',
-                    $transaction->request,
-                );
-                die $result unless $result eq '1';
-            };
-        }
-
         $transaction->_configure_receive_body(
             'request',
             $request_receive_mode,
