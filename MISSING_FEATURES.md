@@ -91,13 +91,13 @@ Useful later additions include:
 These should remain outside the normal CPAN test path because public network
 availability must not make installation tests flaky.
 
-## Convenience callbacks
+## Callback and pull interfaces
 
-Transaction polling is complete, but later releases may add small convenience
-callbacks for terminal completion or error notification.
+Version 0.10 adds the common Unblock client and server callback vocabulary.
 
-Any callback API should remain optional and should not replace the current
-pull/state interface.
+The existing Transaction polling and state interfaces remain available for
+integrations that prefer pull-based control. Future callback work should extend
+the same vocabulary rather than introduce a second application model.
 
 ## Introspection
 
