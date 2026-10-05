@@ -14,6 +14,10 @@
 #define UB_HTTP3_TX_CANCELLED 2U
 #define UB_HTTP3_TX_ERROR     3U
 
+/* ABI v1 is append-only. Consumers must check abi_version and
+ * struct_size before dereferencing entries. Incompatible layouts use a new
+ * ABI version.
+ */
 typedef struct ub_http3_consumer_ops_v1_s {
     uint32_t abi_version;
     size_t struct_size;
