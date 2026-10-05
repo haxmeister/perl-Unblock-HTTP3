@@ -12,7 +12,7 @@ use Uniform::HTTP::Response 0.06 ();
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::_Native ();
 
-our $VERSION = '0.03';
+our $VERSION = '0.10';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
 my $BUFFERED_BODY_RETAIN_BYTES = 16_384;
@@ -90,6 +90,7 @@ sub _new {
     my $stream_id  = delete $args{stream_id};
     my $request    = delete $args{request};
     my $response   = delete $args{response};
+    my $callbacks  = delete($args{callbacks}) || {};
     my $request_streaming = delete $args{request_streaming} ? 1 : 0;
     my $early_data = delete $args{early_data} ? 1 : 0;
 
@@ -100,11 +101,13 @@ sub _new {
         unless defined($stream_id)
             && !ref($stream_id)
             && $stream_id =~ /\A[0-9]+\z/;
-    croak 'Transaction requires a canonical Uniform::HTTP::Request'
-        unless ref($request) eq 'Uniform::HTTP::Request';
-    croak 'Transaction response must be a canonical Uniform::HTTP::Response'
+    croak 'Transaction requires the Uniform HTTP request contract'
+        unless Unblock::HTTP3::Connection::_request_contract($request);
+    croak 'Transaction response must implement the Uniform HTTP response contract'
         if defined($response)
-            && ref($response) ne 'Uniform::HTTP::Response';
+            && !Unblock::HTTP3::Connection::_response_contract($response);
+    croak 'Transaction callbacks must be a hash reference'
+        unless ref($callbacks) eq 'HASH';
     croak 'unknown Transaction option: ' . join(', ', sort keys %args)
         if %args;
 
@@ -113,6 +116,7 @@ sub _new {
         stream_id  => 0 + $stream_id,
         request    => $request,
         response                => $response,
+        callbacks               => { %$callbacks },
         informational           => [],
         request_body            => undef,
         response_body            => undef,
@@ -442,10 +446,29 @@ sub is_cancelled {
     return $self->{state} eq 'cancelled' ? 1 : 0;
 }
 
+sub is_error {
+    my ($self, @args) = @_;
+    croak 'is_error() does not accept arguments' if @args;
+    return $self->{state} eq 'error' ? 1 : 0;
+}
+
 sub is_terminal {
     my ($self, @args) = @_;
     croak 'is_terminal() does not accept arguments' if @args;
     return $TERMINAL{ $self->{state} } ? 1 : 0;
+}
+
+sub _invoke {
+    my ($self, $name, @args) = @_;
+
+    my $callback = $self->{callbacks}{$name} or return 1;
+
+    my $ok = eval {
+        $callback->($self, @args);
+        1;
+    };
+
+    return $ok ? 1 : $@;
 }
 
 sub next_informational {
@@ -460,8 +483,13 @@ sub send_informational {
 
     croak 'send_informational(): Transaction is already terminal'
         if $self->is_terminal;
-    croak 'send_informational(): response must be a canonical Uniform::HTTP::Response'
-        unless ref($response) eq 'Uniform::HTTP::Response';
+    my $connection = $self->{connection}
+        or croak 'send_informational(): Transaction no longer has a connection';
+
+    $connection->_assert_response_contract(
+        $response,
+        'send_informational()',
+    );
     croak 'send_informational(): status must be 100 through 199, excluding 101'
         unless $response->status >= 100
             && $response->status <= 199
@@ -470,9 +498,6 @@ sub send_informational {
         if $response->has_buffered_body;
     croak 'send_informational(): informational responses cannot have trailers'
         if $response->has_trailers;
-
-    my $connection = $self->{connection}
-        or croak 'send_informational(): Transaction no longer has a connection';
 
     $connection->_send_informational_response(
         $self,
@@ -614,7 +639,7 @@ sub response_body {
     );
 
     $self->{response_streaming} = 1;
-    $response->mark_incomplete;
+    $response->mark_incomplete if $response->can('mark_incomplete');
 
     require Unblock::HTTP3::Body::Stream;
 
@@ -628,22 +653,98 @@ sub response_body {
     return $body;
 }
 
-sub send_response {
-    my ($self) = @_;
+sub respond {
+    my ($self, $response, %option) = @_;
 
-    croak 'send_response(): Transaction is already terminal'
+    croak 'respond(): Transaction is already terminal'
+        if $self->is_terminal;
+    croak 'respond(): response output has already started'
+        if $self->{response_output_started};
+
+    my $connection = $self->{connection}
+        or croak 'respond(): Transaction no longer has a connection';
+
+    $connection->_assert_response_contract(
+        $response,
+        'respond()',
+    );
+
+    my $stream_body = delete $option{stream_body};
+    my %stream_option;
+
+    if (defined $stream_body) {
+        if (!ref($stream_body) && "$stream_body" =~ /\A[01]\z/) {
+            $stream_body = $stream_body ? 1 : 0;
+        } elsif (ref($stream_body) eq 'HASH') {
+            %stream_option = %$stream_body;
+            $stream_body = 1;
+        } else {
+            croak 'respond(): stream_body must be 0, 1, or a hash reference';
+        }
+    } else {
+        $stream_body = 0;
+    }
+
+    croak 'respond(): unknown options: ' . join(', ', sort keys %option)
+        if %option;
+    croak 'respond(): stream_body cannot be combined with a buffered Response body'
+        if $stream_body && $response->has_buffered_body;
+
+    $self->{response} = $response;
+    $self->{response_body} = undef;
+    $self->{response_streaming} = 0;
+
+    if ($stream_body) {
+        if (
+            defined($self->{callbacks}{on_drain})
+            && !exists($stream_option{on_drain})
+        ) {
+            $stream_option{on_drain} = sub {
+                my ($body) = @_;
+                my $result = $self->_invoke('on_drain');
+                die $result unless $result eq '1';
+            };
+        }
+
+        $self->response_body(%stream_option);
+    }
+
+    $connection->_respond_transaction($self);
+    return $self;
+}
+
+sub write {
+    my ($self, $bytes) = @_;
+
+    croak 'write(): Transaction is already terminal'
         if $self->is_terminal;
 
     my $connection = $self->{connection}
-        or croak 'send_response(): Transaction no longer has a connection';
+        or croak 'write(): Transaction no longer has a connection';
 
-    my $response = $self->{response}
-        or croak 'send_response(): Transaction has no Response';
+    my $body = $connection->role eq 'client'
+        ? $self->request_body
+        : $self->response_body;
 
-    croak 'send_response(): Response has an incremental body; use response_body()'
-        if $self->{response_streaming};
+    return $body->write($bytes);
+}
 
-    $connection->_send_transaction_response($self);
+sub end {
+    my ($self, @args) = @_;
+
+    croak 'end(): accepts at most one final byte string'
+        if @args > 1;
+    croak 'end(): Transaction is already terminal'
+        if $self->is_terminal;
+
+    my $connection = $self->{connection}
+        or croak 'end(): Transaction no longer has a connection';
+
+    my $body = $connection->role eq 'client'
+        ? $self->request_body
+        : $self->response_body;
+
+    $body->complete(@args);
     return $self;
 }
 
@@ -773,7 +874,8 @@ sub _write_body {
 
     die $error unless $ok;
 
-    $message->mark_complete if $final;
+    $message->mark_complete
+        if $final && $message->can('mark_complete');
     return $can_continue;
 }
 
@@ -931,8 +1033,8 @@ sub _cancel_body_producers {
 sub _push_informational {
     my ($self, $response) = @_;
 
-    croak 'informational response must be a canonical Uniform::HTTP::Response'
-        unless ref($response) eq 'Uniform::HTTP::Response';
+    croak 'informational response must implement the Uniform HTTP response contract'
+        unless Unblock::HTTP3::Connection::_response_contract($response);
 
     push @{ $self->{informational} }, $response;
     return $response;
@@ -945,8 +1047,8 @@ sub _set_response {
         if $self->is_terminal;
     croak 'Transaction already has a response'
         if defined $self->{response};
-    croak 'Transaction response must be a canonical Uniform::HTTP::Response'
-        unless ref($response) eq 'Uniform::HTTP::Response';
+    croak 'Transaction response must implement the Uniform HTTP response contract'
+        unless Unblock::HTTP3::Connection::_response_contract($response);
 
     $self->{response} = $response;
     return $response;
@@ -960,6 +1062,9 @@ sub _mark_complete {
     $self->_discard_datagrams;
     $self->_discard_received_body_buffers;
     $self->{state} = 'complete';
+
+    my $result = $self->_invoke('on_complete');
+    die $result unless $result eq '1';
 
     return $self;
 }
@@ -985,6 +1090,9 @@ sub _mark_error {
     $self->_discard_received_body_buffers;
     $self->{state} = 'error';
     $self->{error} = defined($error) ? "$error" : 'HTTP/3 transaction failed';
+
+    my $result = $self->_invoke('on_error', $self->{error});
+    die $result unless $result eq '1';
 
     return $self;
 }
