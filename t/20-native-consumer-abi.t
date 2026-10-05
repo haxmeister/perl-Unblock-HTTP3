@@ -106,4 +106,37 @@ is(
     'native ABI polls canonical informational responses',
 );
 
+my $queue_connection = bless {
+    started             => 0,
+    failed              => 1,
+    error_code          => 0x0101,
+    error               => 'native ABI test failure',
+    ready_transactions  => [ $transaction ],
+    ready_informational => [ $transaction ],
+}, 'Unblock::HTTP3::Connection';
+
+my $queue_probe =
+    Unblock::HTTP3::_Native::_consumer_queue_probe(
+        $queue_connection,
+    );
+
+is(
+    refaddr($queue_probe->[0]),
+    refaddr($transaction),
+    'native ABI polls ready Transactions from the Connection queue',
+);
+is(
+    refaddr($queue_probe->[1]),
+    refaddr($transaction),
+    'native ABI polls informational Transaction events',
+);
+is($queue_probe->[2], 1, 'native ABI exposes Connection failure state');
+is($queue_probe->[3], 1, 'native ABI reports an available HTTP/3 error code');
+is($queue_probe->[4], 0x0101, 'native ABI preserves the HTTP/3 error code');
+is(
+    $queue_probe->[5],
+    'native ABI test failure',
+    'native ABI exposes the Connection error message',
+);
+
 done_testing;
