@@ -137,6 +137,11 @@ C<transaction_request()>, C<transaction_response()>, and C<error()> return
 borrowed SV pointers. They remain valid only while the owning object remains
 alive and unchanged.
 
+C<request()> returns NULL when the ordinary request path returns undef,
+including temporary QUIC stream-credit backpressure. Poll operations return
+NULL when no item is ready. C<transaction_response()> returns NULL until a
+response exists.
+
 Canonical Request and Response objects may be inspected with the
 Uniform::HTTP 0.06 native FastPath.
 
