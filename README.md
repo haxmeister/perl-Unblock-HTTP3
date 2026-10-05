@@ -19,7 +19,7 @@ QUIC transport.
 ```text
 application or HTTP library
         |
-  Uniform HTTP messages
+  Uniform::HTTP messages
         |
    Unblock::HTTP3
         |
@@ -59,11 +59,11 @@ engines:
 ```text
 Client->new
 Server->new
-request
-respond
-write
-end
-send_informational
+request()
+respond()
+write()
+end()
+send_informational()
 ```
 
 HTTP/3 protocol concepts keep their HTTP/3 names.
