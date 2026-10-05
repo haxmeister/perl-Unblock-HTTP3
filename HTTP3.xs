@@ -2310,6 +2310,42 @@ unblock_http3_consumer_exact_object(
     return (HV *)SvRV(object);
 }
 
+static HV *
+unblock_http3_consumer_exact_connection(
+    pTHX_ SV *object
+)
+{
+    HV *client_stash;
+    HV *server_stash;
+    HV *object_stash;
+
+    if (
+        object == NULL
+        || !SvROK(object)
+        || SvTYPE(SvRV(object)) != SVt_PVHV
+        || !SvOBJECT(SvRV(object))
+        || SvMAGICAL(SvRV(object))
+    ) {
+        croak("Unblock::HTTP3 native ABI requires a plain blessed hash object");
+    }
+
+    client_stash = gv_stashpv("Unblock::HTTP3::Client", 0);
+    server_stash = gv_stashpv("Unblock::HTTP3::Server", 0);
+    object_stash = SvSTASH(SvRV(object));
+
+    if (
+        (client_stash == NULL || object_stash != client_stash)
+        && (server_stash == NULL || object_stash != server_stash)
+    ) {
+        croak(
+            "Unblock::HTTP3 native ABI requires exact class "
+            "Unblock::HTTP3::Client or Unblock::HTTP3::Server"
+        );
+    }
+
+    return (HV *)SvRV(object);
+}
+
 static unblock_http3_consumer_context *
 unblock_http3_consumer_require_context(
     pTHX_ void *opaque
@@ -2464,9 +2500,8 @@ unblock_http3_consumer_create(
 {
     unblock_http3_consumer_context *context;
 
-    (void)unblock_http3_consumer_exact_object(
-        aTHX_ connection,
-        "Unblock::HTTP3::Connection"
+    (void)unblock_http3_consumer_exact_connection(
+        aTHX_ connection
     );
 
     Newxz(context, 1, unblock_http3_consumer_context);
@@ -2478,7 +2513,7 @@ unblock_http3_consumer_create(
     context->request_cv =
         get_cv("Unblock::HTTP3::Connection::request", 0);
     context->send_response_cv =
-        get_cv("Unblock::HTTP3::Transaction::send_response", 0);
+        get_cv("Unblock::HTTP3::Transaction::respond", 0);
     context->send_informational_cv =
         get_cv("Unblock::HTTP3::Transaction::send_informational", 0);
     context->interpreter =
@@ -4360,6 +4395,35 @@ submit_info(self, stream_id, fields)
                 "could not submit HTTP/3 informational response",
                 rv
             );
+        }
+
+void
+submit_trailers(self, stream_id, fields)
+    SV *self
+    IV stream_id
+    SV *fields
+    PREINIT:
+        unblock_http3_native_conn *native;
+        nghttp3_nv *nva;
+        size_t nvlen;
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+        nva = unblock_http3_fields_from_sv(fields, &nvlen);
+
+        rv = nghttp3_conn_submit_trailers(
+            native->conn,
+            (int64_t)stream_id,
+            nva,
+            nvlen
+        );
+
+        if (nva != NULL) {
+            Safefree(nva);
+        }
+
+        if (rv != 0) {
+            unblock_http3_fail("could not submit HTTP/3 trailers", rv);
         }
 
 void
