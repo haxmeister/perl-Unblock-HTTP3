@@ -2245,7 +2245,7 @@ typedef struct {
     HV *connection_hv;
     CV *service_cv;
     CV *request_cv;
-    CV *send_response_cv;
+    CV *respond_cv;
     CV *send_informational_cv;
     void *interpreter;
 } unblock_http3_consumer_context;
@@ -2512,7 +2512,7 @@ unblock_http3_consumer_create(
         get_cv("Unblock::HTTP3::Connection::_service", 0);
     context->request_cv =
         get_cv("Unblock::HTTP3::Connection::request", 0);
-    context->send_response_cv =
+    context->respond_cv =
         get_cv("Unblock::HTTP3::Transaction::respond", 0);
     context->send_informational_cv =
         get_cv("Unblock::HTTP3::Transaction::send_informational", 0);
@@ -2522,7 +2522,7 @@ unblock_http3_consumer_create(
     if (
         context->service_cv == NULL
         || context->request_cv == NULL
-        || context->send_response_cv == NULL
+        || context->respond_cv == NULL
         || context->send_informational_cv == NULL
     ) {
         SvREFCNT_dec(context->connection);
@@ -2772,7 +2772,7 @@ unblock_http3_consumer_require_transaction_owner(
 }
 
 static void
-unblock_http3_consumer_send_response(
+unblock_http3_consumer_respond(
     pTHX_
     void *opaque,
     SV *transaction
@@ -2805,7 +2805,7 @@ unblock_http3_consumer_send_response(
 
     unblock_http3_consumer_call_void_2(
         aTHX_
-        context->send_response_cv,
+        context->respond_cv,
         transaction,
         response
     );
@@ -2923,7 +2923,7 @@ unblock_http3_consumer_destroy(
     context->connection_hv = NULL;
     context->service_cv = NULL;
     context->request_cv = NULL;
-    context->send_response_cv = NULL;
+    context->respond_cv = NULL;
     context->send_informational_cv = NULL;
     context->interpreter = NULL;
 
@@ -2945,7 +2945,7 @@ unblock_http3_consumer_operations = {
     &unblock_http3_consumer_transaction_response,
     &unblock_http3_consumer_transaction_stream_id,
     &unblock_http3_consumer_transaction_state,
-    &unblock_http3_consumer_send_response,
+    &unblock_http3_consumer_respond,
     &unblock_http3_consumer_send_informational,
     &unblock_http3_consumer_failed,
     &unblock_http3_consumer_error_code,
