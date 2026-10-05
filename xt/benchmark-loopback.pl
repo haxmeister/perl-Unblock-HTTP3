@@ -9,7 +9,9 @@ use Time::HiRes qw(time);
 use Net::QUIC;
 use Net::QUIC::Driver;
 use Unblock::HTTP3;
+use Unblock::HTTP3::Client;
 use Unblock::HTTP3::Connection;
+use Unblock::HTTP3::Server;
 use Uniform::HTTP::Request;
 
 my $requests = $ENV{UNBLOCK_HTTP3_BENCH_REQUESTS} // 1000;
@@ -207,11 +209,11 @@ sub make_context {
             10,
         );
 
-    my $client_h3 = Unblock::HTTP3::Connection->client(
+    my $client_h3 = Unblock::HTTP3::Client->new(
         quic => $client_quic,
     );
 
-    my $server_h3 = Unblock::HTTP3::Connection->server(
+    my $server_h3 = Unblock::HTTP3::Server->new(
         quic => $server_quic,
     );
 
@@ -294,7 +296,7 @@ sub run_requests {
             $response->header('content-type', 'application/octet-stream');
             $response->body($response_body);
 
-            $tx->send_response;
+            $tx->respond($tx->response);
         }
 
         my @remaining;
