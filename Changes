@@ -13,6 +13,10 @@ Revision history for Unblock-HTTP3
       Body::Stream and Body::Reader APIs.
     - Add H1/H2-style client request callbacks and server request callbacks
       without removing the existing pull interface.
+    - Keep request-end callbacks independent of buffered versus streaming body
+      mode and composable with advanced Body::Reader and Capsule callbacks.
+    - Exercise the common callback API over real UDP, TLS, QUIC, and HTTP/3
+      loopback traffic.
     - Add Transaction->is_error() so the common lifecycle vocabulary includes
       state(), error(), is_complete(), is_cancelled(), is_error(), and
       is_terminal().
