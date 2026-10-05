@@ -1686,6 +1686,9 @@ sub request {
     $transaction->_enable_datagrams if $datagrams;
 
     if ($receive_body eq 'stream' && defined $callbacks{on_body}) {
+        croak 'request(): on_body cannot be combined with receive_body on_data'
+            if exists $receive_options->{on_data};
+
         my %common_receive = %$receive_options;
         $common_receive{on_data} = sub {
             my ($reader, $bytes) = @_;
@@ -1709,6 +1712,10 @@ sub request {
     $self->{transactions}{$stream_id} = $transaction;
 
     if (defined $stream_body) {
+        croak 'request(): on_drain supplied twice'
+            if defined($callbacks{on_drain})
+                && exists($stream_body->{on_drain});
+
         if (
             defined($callbacks{on_drain})
             && !exists($stream_body->{on_drain})
