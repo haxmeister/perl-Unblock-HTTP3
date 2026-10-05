@@ -6,6 +6,7 @@ MANIFEST.SKIP
 Makefile.PL
 README.md
 docs/ARCHITECTURE.md
+docs/NATIVE-ABI.md
 docs/RFC-COMPLIANCE.md
 lib/Unblock/HTTP3.pm
 lib/Unblock/HTTP3/Body/Reader.pm
@@ -15,6 +16,8 @@ lib/Unblock/HTTP3/Capsule/Parser.pm
 lib/Unblock/HTTP3/Capsule/Stream.pm
 lib/Unblock/HTTP3/Connection.pm
 lib/Unblock/HTTP3/Extension/Stream.pm
+lib/Unblock/HTTP3/NativeABI.pm
+lib/Unblock/HTTP3/NativeABI/unblock_http3_consumer.h
 lib/Unblock/HTTP3/Transaction.pm
 lib/Unblock/HTTP3/_Bytes.pm
 lib/Unblock/HTTP3/_Native.pm
@@ -40,3 +43,4 @@ t/16-rfc-wire-errors.t
 t/17-critical-stream-lifecycle.t
 t/18-client-protocol-errors.t
 t/19-cookie-coalescing.t
+t/20-native-consumer-abi.t

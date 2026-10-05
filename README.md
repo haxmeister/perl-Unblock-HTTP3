@@ -77,6 +77,20 @@ $h3->start;
 Your event-loop adapter continues to drive Net::QUIC. Unblock::HTTP3 never
 blocks waiting for network activity.
 
+## Native consumers
+
+XS event frameworks and HTTP libraries can use the optional
+`Unblock::HTTP3::NativeABI` interface.
+
+It provides a versioned C operations table for the common Connection and
+Transaction path while keeping normal `Unblock::HTTP3::Connection`,
+`Unblock::HTTP3::Transaction`, and canonical `Uniform::HTTP` objects.
+
+The native consumer ABI does not expose libnghttp3 internals and does not
+replace Net::QUIC's transport responsibilities.
+
+See `docs/NATIVE-ABI.md`.
+
 ## Sending a request
 
 A client can submit a normal `Uniform::HTTP::Request`:
@@ -413,6 +427,8 @@ outside normal CPAN installation tests.
 - `Unblock::HTTP3::Body::Reader` - incoming streaming bodies
 - `Unblock::HTTP3::Capsule` - RFC 9297 Capsules
 - `Unblock::HTTP3::Extension::Stream` - generic extension streams
+- `Unblock::HTTP3::NativeABI` - optional native consumer ABI
+- `docs/NATIVE-ABI.md` - C ABI discovery, ownership, and integration rules
 - `docs/ARCHITECTURE.md` - protocol ownership and internal data flow
 - `docs/RFC-COMPLIANCE.md` - standards coverage and native-library limits
 

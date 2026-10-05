@@ -91,6 +91,15 @@ the exact canonical Uniform object directly from validated native byte spans.
 The native path does not create a second HTTP object model. Uniform still owns
 the final Perl Request and Response objects and their normal lifecycle.
 
+Unblock::HTTP3 also exposes an optional outward native consumer ABI for XS
+HTTP libraries and event-framework adapters. That ABI operates on the normal
+Connection and Transaction objects and returns the same canonical Uniform
+messages. It is separate from the inward Uniform native FastPath used by
+Unblock::HTTP3 itself.
+
+The consumer ABI deliberately does not expose libnghttp3 or replace the QUIC
+transport boundary. Net::QUIC remains responsible for QUIC and TLS.
+
 Unblock::HTTP3 adds only protocol-engine concerns. HTTP/3 priority, reset,
 STOP_SENDING, completion, body-stream, Datagram, and Capsule state belongs to
 `Unblock::HTTP3::Transaction`, not to the canonical Uniform message objects.

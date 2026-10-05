@@ -3,6 +3,7 @@ use warnings;
 
 use Alien::nghttp3 0.01 ();
 use ExtUtils::MakeMaker;
+use File::Find ();
 use Uniform::HTTP::FastPath 0.06 ();
 
 my $cflags = Alien::nghttp3->cflags;
@@ -33,6 +34,14 @@ sub _makemaker_libs {
 
 my $libs = _makemaker_libs(Alien::nghttp3->libs);
 
+my %install_files;
+File::Find::find(sub {
+    return unless /\.(?:pm|h)\z/ && -f $_;
+    my $path = $File::Find::name;
+    (my $installed = $path) =~ s{^lib/}{};
+    $install_files{$path} = '$(INST_LIB)/' . $installed;
+}, 'lib');
+
 WriteMakefile(
     NAME             => 'Unblock::HTTP3',
     VERSION_FROM     => 'lib/Unblock/HTTP3.pm',
@@ -40,16 +49,20 @@ WriteMakefile(
     AUTHOR           => 'Joshua S. Day <haxmeister@hotmail.com>',
     LICENSE          => 'mit',
     MIN_PERL_VERSION => '5.020',
+    PM               => \%install_files,
 
     CONFIGURE_REQUIRES => {
         'Alien::nghttp3'       => '0.01',
         'ExtUtils::MakeMaker'  => 0,
+        'File::Find'            => 0,
         'Uniform::HTTP'         => '0.06',
     },
 
     PREREQ_PM => {
         'Alien::nghttp3' => '0.01',
         'Carp'           => 0,
+        'File::Basename' => 0,
+        'File::Spec'     => 0,
         'Net::QUIC'      => '0.04',
         'Scalar::Util'    => 0,
         'Time::HiRes'     => 0,
@@ -111,6 +124,10 @@ WriteMakefile(
             'Unblock::HTTP3::Connection' => {
                 file    => 'lib/Unblock/HTTP3/Connection.pm',
                 version => MM->parse_version('lib/Unblock/HTTP3/Connection.pm'),
+            },
+            'Unblock::HTTP3::NativeABI' => {
+                file    => 'lib/Unblock/HTTP3/NativeABI.pm',
+                version => MM->parse_version('lib/Unblock/HTTP3/NativeABI.pm'),
             },
             'Unblock::HTTP3::Transaction' => {
                 file    => 'lib/Unblock/HTTP3/Transaction.pm',

@@ -2,6 +2,7 @@
 #include "perl.h"
 #include "XSUB.h"
 #include "uniform_http_fastpath.h"
+#include "lib/Unblock/HTTP3/NativeABI/unblock_http3_consumer.h"
 
 #include <nghttp3/nghttp3.h>
 
@@ -2238,6 +2239,667 @@ unblock_http3_uniform_view(
     }
 }
 
+
+typedef struct {
+    SV *connection;
+    HV *connection_hv;
+    CV *service_cv;
+    CV *request_cv;
+    CV *send_response_cv;
+    CV *send_informational_cv;
+    void *interpreter;
+} unblock_http3_consumer_context;
+
+static void *
+unblock_http3_consumer_interpreter(pTHX)
+{
+#ifdef MULTIPLICITY
+    return (void *)aTHX;
+#else
+    return NULL;
+#endif
+}
+
+static SV *
+unblock_http3_consumer_fetch(
+    pTHX_ HV *hv,
+    const char *key,
+    I32 key_len,
+    int required
+)
+{
+    SV **slot = hv_fetch(hv, key, key_len, 0);
+
+    if (slot == NULL) {
+        if (required) {
+            croak("Unblock::HTTP3 native ABI object is missing '%.*s'",
+                (int)key_len, key);
+        }
+
+        return NULL;
+    }
+
+    return *slot;
+}
+
+static HV *
+unblock_http3_consumer_exact_object(
+    pTHX_
+    SV *object,
+    const char *class_name
+)
+{
+    HV *stash;
+
+    if (
+        object == NULL
+        || !SvROK(object)
+        || SvTYPE(SvRV(object)) != SVt_PVHV
+        || !SvOBJECT(SvRV(object))
+        || SvMAGICAL(SvRV(object))
+    ) {
+        croak("Unblock::HTTP3 native ABI requires a plain blessed hash object");
+    }
+
+    stash = gv_stashpv(class_name, 0);
+
+    if (stash == NULL || SvSTASH(SvRV(object)) != stash) {
+        croak("Unblock::HTTP3 native ABI requires exact class %s", class_name);
+    }
+
+    return (HV *)SvRV(object);
+}
+
+static unblock_http3_consumer_context *
+unblock_http3_consumer_require_context(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        (unblock_http3_consumer_context *)opaque;
+
+    if (
+        context == NULL
+        || context->connection == NULL
+        || context->connection_hv == NULL
+        || context->interpreter != unblock_http3_consumer_interpreter(aTHX)
+    ) {
+        croak("Unblock::HTTP3 native consumer context is invalid");
+    }
+
+    return context;
+}
+
+static SV *
+unblock_http3_consumer_call_scalar_2(
+    pTHX_
+    CV *cv,
+    SV *first,
+    SV *second
+)
+{
+    dSP;
+    int count;
+    SV *value;
+    SV *owned = NULL;
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(first);
+    XPUSHs(second);
+    PUTBACK;
+
+    count = call_sv((SV *)cv, G_SCALAR);
+
+    SPAGAIN;
+
+    if (count != 1) {
+        PUTBACK;
+        FREETMPS;
+        LEAVE;
+        croak("Unblock::HTTP3 native ABI callback returned an invalid result");
+    }
+
+    value = POPs;
+
+    if (SvOK(value)) {
+        owned = newSVsv(value);
+    }
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    return owned;
+}
+
+static void
+unblock_http3_consumer_call_void_1(
+    pTHX_
+    CV *cv,
+    SV *first
+)
+{
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(first);
+    PUTBACK;
+
+    (void)call_sv((SV *)cv, G_VOID);
+
+    FREETMPS;
+    LEAVE;
+}
+
+static void
+unblock_http3_consumer_call_void_2(
+    pTHX_
+    CV *cv,
+    SV *first,
+    SV *second
+)
+{
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs(first);
+    XPUSHs(second);
+    PUTBACK;
+
+    (void)call_sv((SV *)cv, G_VOID);
+
+    FREETMPS;
+    LEAVE;
+}
+
+static SV *
+unblock_http3_consumer_shift_queue(
+    pTHX_
+    HV *connection_hv,
+    const char *key,
+    I32 key_len
+)
+{
+    SV *queue_sv;
+    AV *queue;
+
+    queue_sv = unblock_http3_consumer_fetch(
+        aTHX_ connection_hv,
+        key,
+        key_len,
+        1
+    );
+
+    if (
+        !SvROK(queue_sv)
+        || SvTYPE(SvRV(queue_sv)) != SVt_PVAV
+        || SvMAGICAL(SvRV(queue_sv))
+        || SvOBJECT(SvRV(queue_sv))
+    ) {
+        croak("Unblock::HTTP3 native ABI queue storage is invalid");
+    }
+
+    queue = (AV *)SvRV(queue_sv);
+
+    if (av_len(queue) < 0) {
+        return NULL;
+    }
+
+    return av_shift(queue);
+}
+
+static void *
+unblock_http3_consumer_create(
+    pTHX_ SV *connection
+)
+{
+    unblock_http3_consumer_context *context;
+
+    (void)unblock_http3_consumer_exact_object(
+        aTHX_ connection,
+        "Unblock::HTTP3::Connection"
+    );
+
+    Newxz(context, 1, unblock_http3_consumer_context);
+
+    context->connection = newSVsv(connection);
+    context->connection_hv = (HV *)SvRV(context->connection);
+    context->service_cv =
+        get_cv("Unblock::HTTP3::Connection::_service", 0);
+    context->request_cv =
+        get_cv("Unblock::HTTP3::Connection::request", 0);
+    context->send_response_cv =
+        get_cv("Unblock::HTTP3::Transaction::send_response", 0);
+    context->send_informational_cv =
+        get_cv("Unblock::HTTP3::Transaction::send_informational", 0);
+    context->interpreter =
+        unblock_http3_consumer_interpreter(aTHX);
+
+    if (
+        context->service_cv == NULL
+        || context->request_cv == NULL
+        || context->send_response_cv == NULL
+        || context->send_informational_cv == NULL
+    ) {
+        SvREFCNT_dec(context->connection);
+        Safefree(context);
+        croak("Unblock::HTTP3 native ABI could not resolve provider callbacks");
+    }
+
+    return context;
+}
+
+static void
+unblock_http3_consumer_service(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+
+    unblock_http3_consumer_call_void_1(
+        aTHX_ context->service_cv,
+        context->connection
+    );
+}
+
+static int
+unblock_http3_consumer_should_service(
+    pTHX_ unblock_http3_consumer_context *context
+)
+{
+    SV *started = unblock_http3_consumer_fetch(
+        aTHX_ context->connection_hv,
+        "started",
+        7,
+        1
+    );
+    SV *failed = unblock_http3_consumer_fetch(
+        aTHX_ context->connection_hv,
+        "failed",
+        6,
+        1
+    );
+
+    return SvTRUE(started) && !SvTRUE(failed);
+}
+
+static SV *
+unblock_http3_consumer_request(
+    pTHX_
+    void *opaque,
+    SV *request
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+
+    return unblock_http3_consumer_call_scalar_2(
+        aTHX_
+        context->request_cv,
+        context->connection,
+        request
+    );
+}
+
+static SV *
+unblock_http3_consumer_next_transaction(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+
+    if (unblock_http3_consumer_should_service(aTHX_ context)) {
+        unblock_http3_consumer_service(aTHX_ context);
+    }
+
+    return unblock_http3_consumer_shift_queue(
+        aTHX_
+        context->connection_hv,
+        "ready_transactions",
+        18
+    );
+}
+
+static SV *
+unblock_http3_consumer_next_informational(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+
+    if (unblock_http3_consumer_should_service(aTHX_ context)) {
+        unblock_http3_consumer_service(aTHX_ context);
+    }
+
+    return unblock_http3_consumer_shift_queue(
+        aTHX_
+        context->connection_hv,
+        "ready_informational",
+        19
+    );
+}
+
+static HV *
+unblock_http3_consumer_transaction_hv(
+    pTHX_ SV *transaction
+)
+{
+    return unblock_http3_consumer_exact_object(
+        aTHX_
+        transaction,
+        "Unblock::HTTP3::Transaction"
+    );
+}
+
+static SV *
+unblock_http3_consumer_transaction_next_informational(
+    pTHX_ SV *transaction
+)
+{
+    HV *hv = unblock_http3_consumer_transaction_hv(
+        aTHX_ transaction
+    );
+
+    return unblock_http3_consumer_shift_queue(
+        aTHX_
+        hv,
+        "informational",
+        13
+    );
+}
+
+static SV *
+unblock_http3_consumer_transaction_request(
+    pTHX_ SV *transaction
+)
+{
+    HV *hv = unblock_http3_consumer_transaction_hv(
+        aTHX_ transaction
+    );
+
+    return unblock_http3_consumer_fetch(
+        aTHX_ hv,
+        "request",
+        7,
+        1
+    );
+}
+
+static SV *
+unblock_http3_consumer_transaction_response(
+    pTHX_ SV *transaction
+)
+{
+    HV *hv = unblock_http3_consumer_transaction_hv(
+        aTHX_ transaction
+    );
+    SV *response = unblock_http3_consumer_fetch(
+        aTHX_ hv,
+        "response",
+        8,
+        1
+    );
+
+    return SvOK(response) ? response : NULL;
+}
+
+static int64_t
+unblock_http3_consumer_transaction_stream_id(
+    pTHX_ SV *transaction
+)
+{
+    HV *hv = unblock_http3_consumer_transaction_hv(
+        aTHX_ transaction
+    );
+    SV *stream_id = unblock_http3_consumer_fetch(
+        aTHX_ hv,
+        "stream_id",
+        9,
+        1
+    );
+
+    return (int64_t)SvIV(stream_id);
+}
+
+static uint32_t
+unblock_http3_consumer_transaction_state(
+    pTHX_ SV *transaction
+)
+{
+    HV *hv = unblock_http3_consumer_transaction_hv(
+        aTHX_ transaction
+    );
+    SV *state_sv = unblock_http3_consumer_fetch(
+        aTHX_ hv,
+        "state",
+        5,
+        1
+    );
+    STRLEN len;
+    const char *state = SvPV(state_sv, len);
+
+    if (len == 6 && memcmp(state, "active", 6) == 0) {
+        return UB_HTTP3_TX_ACTIVE;
+    }
+
+    if (len == 8 && memcmp(state, "complete", 8) == 0) {
+        return UB_HTTP3_TX_COMPLETE;
+    }
+
+    if (len == 9 && memcmp(state, "cancelled", 9) == 0) {
+        return UB_HTTP3_TX_CANCELLED;
+    }
+
+    if (len == 5 && memcmp(state, "error", 5) == 0) {
+        return UB_HTTP3_TX_ERROR;
+    }
+
+    croak("Unblock::HTTP3 native ABI encountered an unknown Transaction state");
+    return UB_HTTP3_TX_ERROR;
+}
+
+static void
+unblock_http3_consumer_require_transaction_owner(
+    pTHX_
+    unblock_http3_consumer_context *context,
+    SV *transaction
+)
+{
+    HV *hv = unblock_http3_consumer_transaction_hv(
+        aTHX_ transaction
+    );
+    SV *owner = unblock_http3_consumer_fetch(
+        aTHX_ hv,
+        "connection",
+        10,
+        1
+    );
+
+    if (
+        !SvOK(owner)
+        || !SvROK(owner)
+        || SvRV(owner) != SvRV(context->connection)
+    ) {
+        croak("Transaction does not belong to this Unblock::HTTP3 Connection");
+    }
+}
+
+static void
+unblock_http3_consumer_send_response(
+    pTHX_
+    void *opaque,
+    SV *transaction
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+
+    unblock_http3_consumer_require_transaction_owner(
+        aTHX_ context,
+        transaction
+    );
+
+    unblock_http3_consumer_call_void_1(
+        aTHX_
+        context->send_response_cv,
+        transaction
+    );
+}
+
+static void
+unblock_http3_consumer_send_informational(
+    pTHX_
+    void *opaque,
+    SV *transaction,
+    SV *response
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+
+    unblock_http3_consumer_require_transaction_owner(
+        aTHX_ context,
+        transaction
+    );
+
+    unblock_http3_consumer_call_void_2(
+        aTHX_
+        context->send_informational_cv,
+        transaction,
+        response
+    );
+}
+
+static int
+unblock_http3_consumer_failed(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+    SV *failed = unblock_http3_consumer_fetch(
+        aTHX_ context->connection_hv,
+        "failed",
+        6,
+        1
+    );
+
+    return SvTRUE(failed) ? 1 : 0;
+}
+
+static int
+unblock_http3_consumer_error_code(
+    pTHX_
+    void *opaque,
+    uint64_t *code
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+    SV *value = unblock_http3_consumer_fetch(
+        aTHX_ context->connection_hv,
+        "error_code",
+        10,
+        1
+    );
+
+    if (!SvOK(value)) {
+        return 0;
+    }
+
+    if (code == NULL) {
+        croak("Unblock::HTTP3 native ABI error-code output is NULL");
+    }
+
+    *code = (uint64_t)SvUV(value);
+    return 1;
+}
+
+static SV *
+unblock_http3_consumer_error(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        unblock_http3_consumer_require_context(aTHX_ opaque);
+    SV *value = unblock_http3_consumer_fetch(
+        aTHX_ context->connection_hv,
+        "error",
+        5,
+        1
+    );
+
+    return SvOK(value) ? value : NULL;
+}
+
+static void
+unblock_http3_consumer_destroy(
+    pTHX_ void *opaque
+)
+{
+    unblock_http3_consumer_context *context =
+        (unblock_http3_consumer_context *)opaque;
+
+    if (context == NULL) {
+        return;
+    }
+
+    if (
+        context->interpreter != unblock_http3_consumer_interpreter(aTHX)
+    ) {
+        croak("Unblock::HTTP3 native consumer context belongs to another interpreter");
+    }
+
+    if (context->connection != NULL) {
+        SvREFCNT_dec(context->connection);
+        context->connection = NULL;
+    }
+
+    context->connection_hv = NULL;
+    context->service_cv = NULL;
+    context->request_cv = NULL;
+    context->send_response_cv = NULL;
+    context->send_informational_cv = NULL;
+    context->interpreter = NULL;
+
+    Safefree(context);
+}
+
+static const ub_http3_consumer_ops_v1
+unblock_http3_consumer_operations = {
+    UB_HTTP3_CONSUMER_ABI_VERSION,
+    sizeof(ub_http3_consumer_ops_v1),
+    "Unblock::HTTP3 consumer ABI v1",
+    &unblock_http3_consumer_create,
+    &unblock_http3_consumer_service,
+    &unblock_http3_consumer_request,
+    &unblock_http3_consumer_next_transaction,
+    &unblock_http3_consumer_next_informational,
+    &unblock_http3_consumer_transaction_next_informational,
+    &unblock_http3_consumer_transaction_request,
+    &unblock_http3_consumer_transaction_response,
+    &unblock_http3_consumer_transaction_stream_id,
+    &unblock_http3_consumer_transaction_state,
+    &unblock_http3_consumer_send_response,
+    &unblock_http3_consumer_send_informational,
+    &unblock_http3_consumer_failed,
+    &unblock_http3_consumer_error_code,
+    &unblock_http3_consumer_error,
+    &unblock_http3_consumer_destroy
+};
+
 static nghttp3_nv *
 unblock_http3_fields_from_sv(SV *fields_sv, size_t *pnvlen)
 {
@@ -2331,6 +2993,173 @@ CLONE(...)
             UHTTP_NATIVE_ABI_VERSION
         ))
             croak("Uniform::HTTP native FastPath clone ABI mismatch");
+
+
+UV
+_consumer_operations_address()
+    CODE:
+        RETVAL = PTR2UV(&unblock_http3_consumer_operations);
+    OUTPUT:
+        RETVAL
+
+UV
+_consumer_operations_size()
+    CODE:
+        RETVAL = (UV)sizeof(ub_http3_consumer_ops_v1);
+    OUTPUT:
+        RETVAL
+
+int
+_consumer_context_probe(connection)
+    SV *connection
+    PREINIT:
+        void *context;
+    CODE:
+        context = unblock_http3_consumer_operations.create(
+            aTHX_ connection
+        );
+        unblock_http3_consumer_operations.destroy(
+            aTHX_ context
+        );
+        RETVAL = 1;
+    OUTPUT:
+        RETVAL
+
+
+SV *
+_consumer_transaction_probe(transaction)
+    SV *transaction
+    PREINIT:
+        AV *out;
+        SV *request;
+        SV *response;
+        SV *informational;
+    CODE:
+        request =
+            unblock_http3_consumer_operations.transaction_request(
+                aTHX_ transaction
+            );
+        response =
+            unblock_http3_consumer_operations.transaction_response(
+                aTHX_ transaction
+            );
+        informational =
+            unblock_http3_consumer_operations.transaction_next_informational(
+                aTHX_ transaction
+            );
+
+        out = newAV();
+        av_push(
+            out,
+            newSViv(
+                (IV)unblock_http3_consumer_operations.transaction_stream_id(
+                    aTHX_ transaction
+                )
+            )
+        );
+        av_push(
+            out,
+            newSVuv(
+                (UV)unblock_http3_consumer_operations.transaction_state(
+                    aTHX_ transaction
+                )
+            )
+        );
+        av_push(out, newSVsv(request));
+        av_push(
+            out,
+            response == NULL
+                ? newSV(0)
+                : newSVsv(response)
+        );
+        av_push(
+            out,
+            informational == NULL
+                ? newSV(0)
+                : informational
+        );
+
+        RETVAL = newRV_noinc((SV *)out);
+    OUTPUT:
+        RETVAL
+
+
+SV *
+_consumer_queue_probe(connection)
+    SV *connection
+    PREINIT:
+        void *context;
+        SV *transaction;
+        SV *informational;
+        SV *error;
+        uint64_t code;
+        int has_code;
+        AV *out;
+    CODE:
+        context = unblock_http3_consumer_operations.create(
+            aTHX_ connection
+        );
+
+        transaction =
+            unblock_http3_consumer_operations.next_transaction(
+                aTHX_ context
+            );
+        informational =
+            unblock_http3_consumer_operations.next_informational(
+                aTHX_ context
+            );
+        has_code =
+            unblock_http3_consumer_operations.error_code(
+                aTHX_ context,
+                &code
+            );
+        error =
+            unblock_http3_consumer_operations.error(
+                aTHX_ context
+            );
+
+        out = newAV();
+        av_push(
+            out,
+            transaction == NULL
+                ? newSV(0)
+                : transaction
+        );
+        av_push(
+            out,
+            informational == NULL
+                ? newSV(0)
+                : informational
+        );
+        av_push(
+            out,
+            newSViv(
+                unblock_http3_consumer_operations.failed(
+                    aTHX_ context
+                )
+            )
+        );
+        av_push(out, newSViv(has_code ? 1 : 0));
+        av_push(
+            out,
+            has_code
+                ? newSVuv((UV)code)
+                : newSV(0)
+        );
+        av_push(
+            out,
+            error == NULL
+                ? newSV(0)
+                : newSVsv(error)
+        );
+
+        unblock_http3_consumer_operations.destroy(
+            aTHX_ context
+        );
+
+        RETVAL = newRV_noinc((SV *)out);
+    OUTPUT:
+        RETVAL
 
 
 SV *
