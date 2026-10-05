@@ -1,5 +1,39 @@
 Revision history for Unblock-HTTP3
 
+0.10  2026-10-04
+    - Make a deliberate breaking API harmonization pass across Unblock::HTTP3.
+    - Add Unblock::HTTP3::Client and Unblock::HTTP3::Server with new().
+    - Remove Connection->client() and Connection->server() from the public API.
+      No compatibility aliases are provided.
+    - Replace Transaction->send_response() with Transaction->respond().
+      No compatibility alias is provided.
+    - Add Transaction->write() and Transaction->end() for the common streaming
+      request and response body API.
+    - Accept stream_body => 1 for the common case while retaining the advanced
+      Body::Stream and Body::Reader APIs.
+    - Add H1/H2-style client request callbacks and server request callbacks
+      without removing the existing pull interface.
+    - Keep request-end callbacks independent of buffered versus streaming body
+      mode and composable with advanced Body::Reader and Capsule callbacks.
+    - Exercise the common callback API over real UDP, TLS, QUIC, and HTTP/3
+      loopback traffic.
+    - Add Transaction->is_error() so the common lifecycle vocabulary includes
+      state(), error(), is_complete(), is_cancelled(), is_error(), and
+      is_terminal().
+    - Accept the portable Uniform HTTP request and response contract while
+      keeping exact canonical Uniform objects on the native fast path.
+    - Keep the native consumer ABI restricted to exact built-in Client, Server,
+      and Transaction objects; subclasses and adapters use the portable path.
+    - Normalize NativeABI discovery around definition(), native_include_dir(),
+      header_path(), and c_header().
+    - Rename the native final-response operation from send_response to respond
+      so the installed C header uses the same 0.10 vocabulary.
+    - Add staged-install coverage that verifies the public NativeABI header is
+      installed and compiles for an external C consumer.
+    - Keep HTTP/3-specific Datagrams, Capsules, Extended CONNECT, priorities,
+      QPACK, 0-RTT, RESET_STREAM, and STOP_SENDING APIs protocol-specific.
+    - Jump from 0.03 to 0.10 to make the intentional public API break obvious.
+
 0.03  2026-10-04
     - Require Uniform::HTTP 0.06 for its header-only native FastPath ABI.
     - Inspect canonical outgoing Request and Response objects directly in XS,

@@ -10,7 +10,8 @@ use Time::HiRes qw(time);
 use Net::QUIC;
 use Net::QUIC::Driver;
 use Unblock::HTTP3;
-use Unblock::HTTP3::Connection;
+use Unblock::HTTP3::Client;
+use Unblock::HTTP3::Server;
 use Uniform::HTTP::Request;
 
 my $requests = $ENV{UNBLOCK_HTTP3_BENCH_REQUESTS} // 1000;
@@ -152,7 +153,7 @@ sub run_server {
         $server_quic ||= $driver->next_connection;
 
         if ($server_quic && $server_quic->ready && !$h3) {
-            $h3 = Unblock::HTTP3::Connection->server(
+            $h3 = Unblock::HTTP3::Server->new(
                 quic => $server_quic,
             );
             $h3->start;
@@ -169,7 +170,7 @@ sub run_server {
                 );
                 $response->body($response_body);
 
-                $tx->send_response;
+                $tx->respond($tx->response);
             }
 
             die "server HTTP/3 connection failed: "
@@ -351,7 +352,7 @@ sub make_client_context {
             10,
         );
 
-    my $h3 = Unblock::HTTP3::Connection->client(
+    my $h3 = Unblock::HTTP3::Client->new(
         quic => $quic,
     );
 

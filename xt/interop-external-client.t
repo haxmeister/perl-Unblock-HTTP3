@@ -10,7 +10,7 @@ use Test2::V0;
 use Time::HiRes qw(time);
 
 use Net::QUIC::Driver;
-use Unblock::HTTP3::Connection;
+use Unblock::HTTP3::Server;
 
 my $client = $ENV{UNBLOCK_HTTP3_EXTERNAL_CLIENT};
 
@@ -142,7 +142,7 @@ while (time() < $hard_deadline) {
     $server_quic ||= $driver->next_connection;
 
     if ($server_quic && $server_quic->ready && !$h3) {
-        $h3 = Unblock::HTTP3::Connection->server(
+        $h3 = Unblock::HTTP3::Server->new(
             quic => $server_quic,
         );
         $h3->start;
@@ -159,7 +159,7 @@ while (time() < $hard_deadline) {
             $response->header('x-unblock-http3-interop', 'quic-go');
             $response->body("unblock-http3-quic-go-interop\n");
 
-            $tx->send_response;
+            $tx->respond($tx->response);
             $response_sent = 1;
         }
     }
