@@ -89,8 +89,8 @@ sub _request_contract {
 
     for my $method (qw(
         method target scheme authority protocol version
-        header_values header_count header_name header_value
-        trailer_count trailer_name trailer_value has_trailers
+        header_count header_name header_value
+        trailer_count trailer_name trailer_value
         has_buffered_body body
     )) {
         return unless $request->can($method);
@@ -105,8 +105,8 @@ sub _response_contract {
 
     for my $method (qw(
         status version
-        header_values header_count header_name header_value
-        trailer_count trailer_name trailer_value has_trailers
+        header_count header_name header_value
+        trailer_count trailer_name trailer_value
         has_buffered_body body
     )) {
         return unless $response->can($method);
