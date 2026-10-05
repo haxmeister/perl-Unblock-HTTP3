@@ -6,6 +6,7 @@ use Test2::V0;
 
 use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
+use Unblock::HTTP3::Client;
 use Unblock::HTTP3::Connection;
 use Unblock::HTTP3::NativeABI;
 use Unblock::HTTP3::Transaction;
@@ -47,7 +48,7 @@ like(
     'native ABI exposes direct canonical request access',
 );
 
-my $fake_connection = bless {}, 'Unblock::HTTP3::Connection';
+my $fake_connection = bless {}, 'Unblock::HTTP3::Client';
 
 ok(
     Unblock::HTTP3::_Native::_consumer_context_probe(
