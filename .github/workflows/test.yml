@@ -60,3 +60,32 @@ jobs:
       - name: Test distribution
         if: matrix.perl == '5.44'
         run: perl -MConfig -e 'system($Config{make}, "disttest") == 0 or exit 1'
+
+      - name: Check installed NativeABI
+        if: matrix.perl == '5.44'
+        shell: bash
+        run: |
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE" dist
+
+          DIST="$PWD/Unblock-HTTP3-0.10.tar.gz"
+          test -f "$DIST"
+
+          WORK="$RUNNER_TEMP/unblock-http3-nativeabi-dist"
+          INSTALL="$RUNNER_TEMP/unblock-http3-nativeabi-install"
+
+          rm -rf "$WORK" "$INSTALL"
+          mkdir -p "$WORK" "$INSTALL"
+
+          tar -xzf "$DIST" -C "$WORK"
+          cd "$WORK/Unblock-HTTP3-0.10"
+
+          perl Makefile.PL INSTALL_BASE="$INSTALL"
+          "$MAKE"
+          "$MAKE" install
+
+          ARCH=$(perl -MConfig -e 'print $Config{archname}')
+          export PERL5LIB="$INSTALL/lib/perl5:$INSTALL/lib/perl5/$ARCH"
+
+          cd "$GITHUB_WORKSPACE"
+          UNBLOCK_HTTP3_INSTALL_ROOT="$INSTALL" perl xt/installed-nativeabi.t
