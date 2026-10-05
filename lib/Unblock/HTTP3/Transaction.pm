@@ -705,75 +705,16 @@ sub respond {
 
     croak 'respond(): Transaction is already terminal'
         if $self->is_terminal;
-    croak 'respond(): response output has already started'
-        if $self->{response_output_started};
 
     my $connection = $self->{connection}
-        or croak 'respond(): Transaction no longer has a connection';
+        or croak 'respond(): HTTP/3 connection is no longer available';
 
-    $connection->_assert_response_contract(
+    $connection->_respond_transaction(
+        $self,
         $response,
-        'respond()',
+        %option,
     );
 
-    my $stream_body = delete $option{stream_body};
-    my $on_drain = delete $option{on_drain};
-    my $on_error = delete $option{on_error};
-    my %stream_option;
-
-    croak 'respond(): on_drain must be a code reference'
-        if defined($on_drain) && ref($on_drain) ne 'CODE';
-    croak 'respond(): on_error must be a code reference'
-        if defined($on_error) && ref($on_error) ne 'CODE';
-
-    if (defined $stream_body) {
-        if (!ref($stream_body) && "$stream_body" =~ /\A[01]\z/) {
-            $stream_body = $stream_body ? 1 : 0;
-        } elsif (ref($stream_body) eq 'HASH') {
-            %stream_option = %$stream_body;
-            $stream_body = 1;
-        } else {
-            croak 'respond(): stream_body must be 0, 1, or a hash reference';
-        }
-    } else {
-        $stream_body = 0;
-    }
-
-    croak 'respond(): unknown options: ' . join(', ', sort keys %option)
-        if %option;
-    croak 'respond(): on_drain requires stream_body'
-        if defined($on_drain) && !$stream_body;
-    croak 'respond(): stream_body cannot be combined with a buffered Response body'
-        if $stream_body && $response->has_buffered_body;
-
-    $self->_set_callback('on_error', $on_error)
-        if defined $on_error;
-    $self->_set_callback('on_drain', $on_drain)
-        if defined $on_drain;
-
-    $self->{response} = $response;
-    $self->{response_body} = undef;
-    $self->{response_streaming} = 0;
-
-    if ($stream_body) {
-        croak 'respond(): on_drain supplied twice'
-            if defined($on_drain) && exists($stream_option{on_drain});
-
-        if (
-            defined($self->{callbacks}{on_drain})
-            && !exists($stream_option{on_drain})
-        ) {
-            $stream_option{on_drain} = sub {
-                my ($body) = @_;
-                my $result = $self->_invoke('on_drain');
-                die $result unless $result eq '1';
-            };
-        }
-
-        $self->response_body(%stream_option);
-    }
-
-    $connection->_respond_transaction($self);
     return $self;
 }
 
@@ -784,23 +725,14 @@ sub write {
         if $self->is_terminal;
 
     my $connection = $self->{connection}
-        or croak 'write(): Transaction no longer has a connection';
+        or croak 'write(): HTTP/3 connection is no longer available';
 
-    my $body;
-
-    if ($connection->role eq 'client') {
-        croak 'write(): request was not opened with stream_body'
-            unless $self->{request_streaming};
-        $body = $self->request_body;
-    } else {
-        croak 'write(): respond() was not called with stream_body'
-            unless $self->{response_streaming}
-                && $self->{response_output_started};
-        $body = $self->{response_body}
-            or croak 'write(): streaming response body is unavailable';
-    }
-
-    return $body->write($bytes);
+    return $connection->_write_stream_body(
+        $self,
+        $bytes,
+        0,
+        'write',
+    );
 }
 
 sub end {
@@ -812,23 +744,16 @@ sub end {
         if $self->is_terminal;
 
     my $connection = $self->{connection}
-        or croak 'end(): Transaction no longer has a connection';
+        or croak 'end(): HTTP/3 connection is no longer available';
 
-    my $body;
+    my $bytes = @args ? $args[0] : '';
+    $connection->_write_stream_body(
+        $self,
+        $bytes,
+        1,
+        'end',
+    );
 
-    if ($connection->role eq 'client') {
-        croak 'end(): request was not opened with stream_body'
-            unless $self->{request_streaming};
-        $body = $self->request_body;
-    } else {
-        croak 'end(): respond() was not called with stream_body'
-            unless $self->{response_streaming}
-                && $self->{response_output_started};
-        $body = $self->{response_body}
-            or croak 'end(): streaming response body is unavailable';
-    }
-
-    $body->complete(@args);
     return $self;
 }
 
@@ -1166,7 +1091,7 @@ sub _mark_cancelled {
 }
 
 sub _mark_error {
-    my ($self, $error) = @_;
+    my ($self, $error, $error_code) = @_;
     return $self if $self->is_terminal;
 
     $self->_cancel_body_producers;
@@ -1175,7 +1100,11 @@ sub _mark_error {
     $self->{state} = 'error';
     $self->{error} = defined($error) ? "$error" : 'HTTP/3 transaction failed';
 
-    my $result = $self->_invoke('on_error', $self->{error});
+    my $result = $self->_invoke(
+        'on_error',
+        $self->{error},
+        $error_code,
+    );
     die $result unless $result eq '1';
 
     return $self;
