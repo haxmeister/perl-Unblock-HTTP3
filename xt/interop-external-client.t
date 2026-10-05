@@ -10,7 +10,6 @@ use Test2::V0;
 use Time::HiRes qw(time);
 
 use Net::QUIC::Driver;
-use Unblock::HTTP3::Connection;
 use Unblock::HTTP3::Server;
 
 my $client = $ENV{UNBLOCK_HTTP3_EXTERNAL_CLIENT};
