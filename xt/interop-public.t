@@ -12,7 +12,6 @@ use Time::HiRes qw(time);
 
 use Net::QUIC::Driver;
 use Unblock::HTTP3::Client;
-use Unblock::HTTP3::Connection;
 use Uniform::HTTP::Request;
 
 plan skip_all => 'set UNBLOCK_HTTP3_PUBLIC_INTEROP=1 to run public HTTP/3 interoperability tests'
