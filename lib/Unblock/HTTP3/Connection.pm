@@ -1617,6 +1617,9 @@ sub request {
     $receive_body = 'stream'
         if defined $callbacks{on_body};
 
+    croak 'request(): on_drain requires stream_body'
+        if defined($callbacks{on_drain}) && !defined($stream_body);
+
     if (exists $option{receive_body}) {
         my $value = delete $option{receive_body};
 
