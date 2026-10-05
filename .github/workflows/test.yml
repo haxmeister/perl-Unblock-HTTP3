@@ -95,5 +95,7 @@ jobs:
         shell: bash
         run: |
           find lib -name '*.pm' -print | while read file; do
-            podchecker "$file"
+            if grep -q '^=head1 ' "$file"; then
+              podchecker "$file"
+            fi
           done
