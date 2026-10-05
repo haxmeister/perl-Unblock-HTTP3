@@ -83,6 +83,38 @@ sub _parse_priority_field {
     };
 }
 
+sub _request_contract {
+    my ($request) = @_;
+    return unless blessed($request);
+
+    for my $method (qw(
+        method target scheme authority protocol version
+        header_values header_count header_name header_value
+        trailer_count trailer_name trailer_value has_trailers
+        has_buffered_body body
+    )) {
+        return unless $request->can($method);
+    }
+
+    return 1;
+}
+
+sub _response_contract {
+    my ($response) = @_;
+    return unless blessed($response);
+
+    for my $method (qw(
+        status version
+        header_values header_count header_name header_value
+        trailer_count trailer_name trailer_value has_trailers
+        has_buffered_body body
+    )) {
+        return unless $response->can($method);
+    }
+
+    return 1;
+}
+
 sub _new {
     my ($class, %args) = @_;
 
@@ -102,10 +134,10 @@ sub _new {
             && !ref($stream_id)
             && $stream_id =~ /\A[0-9]+\z/;
     croak 'Transaction requires the Uniform HTTP request contract'
-        unless Unblock::HTTP3::Connection::_request_contract($request);
+        unless _request_contract($request);
     croak 'Transaction response must implement the Uniform HTTP response contract'
         if defined($response)
-            && !Unblock::HTTP3::Connection::_response_contract($response);
+            && !_response_contract($response);
     croak 'Transaction callbacks must be a hash reference'
         unless ref($callbacks) eq 'HASH';
     croak 'unknown Transaction option: ' . join(', ', sort keys %args)
@@ -1066,7 +1098,7 @@ sub _push_informational {
     my ($self, $response) = @_;
 
     croak 'informational response must implement the Uniform HTTP response contract'
-        unless Unblock::HTTP3::Connection::_response_contract($response);
+        unless _response_contract($response);
 
     push @{ $self->{informational} }, $response;
     return $response;
@@ -1080,7 +1112,7 @@ sub _set_response {
     croak 'Transaction already has a response'
         if defined $self->{response};
     croak 'Transaction response must implement the Uniform HTTP response contract'
-        unless Unblock::HTTP3::Connection::_response_contract($response);
+        unless _response_contract($response);
 
     $self->{response} = $response;
     return $response;
