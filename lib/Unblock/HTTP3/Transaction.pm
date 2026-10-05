@@ -458,6 +458,21 @@ sub is_terminal {
     return $TERMINAL{ $self->{state} } ? 1 : 0;
 }
 
+sub _set_callback {
+    my ($self, $name, $callback) = @_;
+
+    croak "_set_callback(): callback must be a code reference or undef"
+        if defined($callback) && ref($callback) ne 'CODE';
+
+    if (defined $callback) {
+        $self->{callbacks}{$name} = $callback;
+    } else {
+        delete $self->{callbacks}{$name};
+    }
+
+    return $self;
+}
+
 sub _invoke {
     my ($self, $name, @args) = @_;
 
@@ -670,7 +685,14 @@ sub respond {
     );
 
     my $stream_body = delete $option{stream_body};
+    my $on_drain = delete $option{on_drain};
+    my $on_error = delete $option{on_error};
     my %stream_option;
+
+    croak 'respond(): on_drain must be a code reference'
+        if defined($on_drain) && ref($on_drain) ne 'CODE';
+    croak 'respond(): on_error must be a code reference'
+        if defined($on_error) && ref($on_error) ne 'CODE';
 
     if (defined $stream_body) {
         if (!ref($stream_body) && "$stream_body" =~ /\A[01]\z/) {
@@ -687,14 +709,24 @@ sub respond {
 
     croak 'respond(): unknown options: ' . join(', ', sort keys %option)
         if %option;
+    croak 'respond(): on_drain requires stream_body'
+        if defined($on_drain) && !$stream_body;
     croak 'respond(): stream_body cannot be combined with a buffered Response body'
         if $stream_body && $response->has_buffered_body;
+
+    $self->_set_callback('on_error', $on_error)
+        if defined $on_error;
+    $self->_set_callback('on_drain', $on_drain)
+        if defined $on_drain;
 
     $self->{response} = $response;
     $self->{response_body} = undef;
     $self->{response_streaming} = 0;
 
     if ($stream_body) {
+        croak 'respond(): on_drain supplied twice'
+            if defined($on_drain) && exists($stream_option{on_drain});
+
         if (
             defined($self->{callbacks}{on_drain})
             && !exists($stream_option{on_drain})
