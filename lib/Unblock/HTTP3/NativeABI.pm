@@ -73,7 +73,7 @@ This module exposes the optional native consumer ABI for XS event frameworks
 and HTTP libraries.
 
 The normal Perl API remains the portable interface. Native consumers may keep
-one persistent ABI context for an C<Unblock::HTTP3::Connection> and use C
+one persistent ABI context for a C<Unblock::HTTP3::Connection> and use C
 function pointers for the common connection and transaction path.
 
 The ABI does not expose libnghttp3 structures or private Unblock::HTTP3
@@ -95,6 +95,10 @@ current operations address.
 
 Consumers must check both C<abi_version> and C<struct_size> before
 dereferencing operations.
+
+ABI version 1 accepts exact C<Unblock::HTTP3::Connection> and
+C<Unblock::HTTP3::Transaction> objects. Subclasses should use the portable
+Perl API.
 
 =head1 HEADER
 
