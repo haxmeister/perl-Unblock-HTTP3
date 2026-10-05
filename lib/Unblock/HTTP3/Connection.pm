@@ -1518,7 +1518,7 @@ sub _fail_connection {
 
     for my $transaction (values %{ $self->{transactions} }) {
         next if $transaction->is_terminal;
-        $transaction->_mark_error($message);
+        $transaction->_mark_error($message, $code);
     }
 
     $self->{quic}->close($code);
@@ -2603,7 +2603,7 @@ sub _reject_datagram_stream {
     }
 
     $self->{native}->discard_body($id);
-    $transaction->_mark_error($reason);
+    $transaction->_mark_error($reason, $H3_DATAGRAM_ERROR);
     return;
 }
 
