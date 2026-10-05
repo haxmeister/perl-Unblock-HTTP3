@@ -48,6 +48,17 @@ like(
     'native ABI exposes direct canonical request access',
 );
 
+like(
+    Unblock::HTTP3::NativeABI::c_header(),
+    qr/\(\*respond\)\s*\(/,
+    'native ABI uses the common respond vocabulary',
+);
+unlike(
+    Unblock::HTTP3::NativeABI::c_header(),
+    qr/\(\*send_response\)\s*\(/,
+    'native ABI does not retain the old send_response name',
+);
+
 my $fake_connection = bless {}, 'Unblock::HTTP3::Client';
 
 ok(
