@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP3
 
-Next
+0.03  2026-10-04
     - Require Uniform::HTTP 0.06 for its header-only native FastPath ABI.
     - Inspect canonical outgoing Request and Response objects directly in XS,
       avoiding Perl FastPath views and temporary HTTP/3 wire-field arrays.
