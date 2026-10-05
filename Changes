@@ -9,6 +9,12 @@ Next
     - Preserve HTTP/3 semantic validation, Cookie coalescing, field-section
       limits, message lifecycle state, and canonical Uniform object ownership.
     - Add native-path loopback coverage and HTTP-layer microbenchmarks.
+    - Add a public versioned native consumer ABI for XS event frameworks and
+      HTTP libraries, with an installed C header and persistent Connection
+      context.
+    - Expose native service, request, Transaction polling, canonical Uniform
+      message access, response sending, and failure-state inspection without
+      exposing libnghttp3 or private storage.
 
 0.02  2026-10-04
     - Require Uniform::HTTP 0.05 and use exact canonical Uniform::HTTP::Request
