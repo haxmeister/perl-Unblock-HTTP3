@@ -2780,16 +2780,34 @@ unblock_http3_consumer_send_response(
 {
     unblock_http3_consumer_context *context =
         unblock_http3_consumer_require_context(aTHX_ opaque);
+    HV *transaction_hv;
+    SV *response;
 
     unblock_http3_consumer_require_transaction_owner(
         aTHX_ context,
         transaction
     );
 
-    unblock_http3_consumer_call_void_1(
+    transaction_hv = unblock_http3_consumer_exact_object(
+        aTHX_ transaction,
+        "Unblock::HTTP3::Transaction"
+    );
+    response = unblock_http3_consumer_fetch(
+        aTHX_ transaction_hv,
+        "response",
+        8,
+        1
+    );
+
+    if (!SvOK(response)) {
+        croak("HTTP/3 Transaction has no response");
+    }
+
+    unblock_http3_consumer_call_void_2(
         aTHX_
         context->send_response_cv,
-        transaction
+        transaction,
+        response
     );
 }
 
