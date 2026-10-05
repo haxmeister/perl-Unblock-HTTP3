@@ -46,3 +46,4 @@ t/17-critical-stream-lifecycle.t
 t/18-client-protocol-errors.t
 t/19-cookie-coalescing.t
 t/20-native-consumer-abi.t
+t/21-api-harmonization.t
