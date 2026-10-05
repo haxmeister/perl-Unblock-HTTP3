@@ -754,16 +754,16 @@ my $stream_request = Uniform::HTTP::Request->new(
 my $stream_request_cancelled = 0;
 my $stream_request_tx = $client_h3->request(
     $stream_request,
-    stream_body => {
-        on_cancel => sub {
-            ++$stream_request_cancelled;
-        },
-    },
+    stream_body => 1,
 );
 
 isa_ok($stream_request_tx, ['Unblock::HTTP3::Transaction']);
 
-my $request_producer = $stream_request_tx->request_body;
+my $request_producer = $stream_request_tx->request_body(
+    on_cancel => sub {
+        ++$stream_request_cancelled;
+    },
+);
 isa_ok($request_producer, ['Unblock::HTTP3::Body::Stream']);
 
 ok(
@@ -927,7 +927,7 @@ my $receive_stream_request = Uniform::HTTP::Request->new(
 
 my $receive_stream_client_tx = $client_h3->request(
     $receive_stream_request,
-    stream_body => {},
+    stream_body => 1,
 );
 
 my $receive_request_writer = $receive_stream_client_tx->request_body;
@@ -1003,7 +1003,7 @@ my $stream_trailer_request = Uniform::HTTP::Request->new(
 
 my $stream_trailer_client_tx = $client_h3->request(
     $stream_trailer_request,
-    stream_body => {},
+    stream_body => 1,
 );
 
 my $stream_trailer_request_body =
@@ -1273,7 +1273,7 @@ my $uniform_stream_request = Uniform::HTTP::Request->new(
 
 my $uniform_stream_client_tx = $client_h3->request(
     $uniform_stream_request,
-    stream_body => {},
+    stream_body => 1,
 );
 my $uniform_stream_writer = $uniform_stream_client_tx->request_body;
 
