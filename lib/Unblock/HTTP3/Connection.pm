@@ -831,7 +831,7 @@ sub _assert_request_semantics {
         authority   => $request->authority,
         target      => $request->target,
         protocol    => $request->protocol,
-        host_values => $request->header_values('host'),
+        host_values => _message_header_values($request, 'host'),
     );
 
     croak "$operation: $error"
@@ -1593,7 +1593,7 @@ sub request {
         croak 'request(): CONNECT cannot use a buffered request body'
             if $request->has_buffered_body;
         croak 'request(): CONNECT cannot use request trailers'
-            if $request->has_trailers;
+            if $request->trailer_count;
 
         $receive_body = 'stream';
         $stream_body = 1;
@@ -1749,8 +1749,8 @@ sub _request_contract {
 
     for my $method (qw(
         method target scheme authority protocol version
-        header_values header_count header_name header_value
-        trailer_count trailer_name trailer_value has_trailers
+        header_count header_name header_value
+        trailer_count trailer_name trailer_value
         has_buffered_body body
     )) {
         return unless $request->can($method);
@@ -1765,14 +1765,29 @@ sub _response_contract {
 
     for my $method (qw(
         status version
-        header_values header_count header_name header_value
-        trailer_count trailer_name trailer_value has_trailers
+        header_count header_name header_value
+        trailer_count trailer_name trailer_value
         has_buffered_body body
     )) {
         return unless $response->can($method);
     }
 
     return 1;
+}
+
+sub _message_header_values {
+    my ($message, $wanted) = @_;
+
+    $wanted = lc $wanted;
+    my @values;
+
+    for my $index (0 .. $message->header_count - 1) {
+        my $name = lc $message->header_name($index);
+        push @values, $message->header_value($index)
+            if $name eq $wanted;
+    }
+
+    return \@values;
 }
 
 sub _portable_headers {
@@ -1854,7 +1869,7 @@ sub _assert_http3_version {
 sub _declared_content_length {
     my ($message, $operation) = @_;
 
-    my $values = $message->header_values('content-length');
+    my $values = _message_header_values($message, 'content-length');
     return unless @$values;
 
     croak "$operation: multiple Content-Length fields are not allowed"
@@ -2073,7 +2088,7 @@ sub _capsule_protocol_response_error {
 sub _assert_capsule_protocol_response {
     my ($response, $operation) = @_;
 
-    my $values = $response->header_values('capsule-protocol');
+    my $values = _message_header_values($response, 'capsule-protocol');
     return unless @$values;
     return if $response->status >= 200 && $response->status < 300;
 
@@ -2125,7 +2140,7 @@ sub _assert_response_message_allowed {
     croak "$operation: $reason"
         if $response->has_buffered_body
             || $transaction->_response_is_streaming
-            || $response->has_trailers;
+            || $response->trailer_count;
 
     return;
 }
