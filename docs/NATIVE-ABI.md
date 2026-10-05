@@ -48,6 +48,9 @@ The operations table is available through:
 Consumers must verify both the ABI version and structure size before using the
 table.
 
+ABI version 1 is append-only. New optional operations may be added at the end
+of the structure. An incompatible layout change requires a new ABI version.
+
 ABI version 1 accepts exact `Unblock::HTTP3::Connection` and
 `Unblock::HTTP3::Transaction` objects. Subclasses should use the portable
 Perl API.
