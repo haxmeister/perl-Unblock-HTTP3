@@ -114,7 +114,7 @@ my $queue_connection = bless {
     error               => 'native ABI test failure',
     ready_transactions  => [ $transaction ],
     ready_informational => [ $transaction ],
-}, 'Unblock::HTTP3::Connection';
+}, 'Unblock::HTTP3::Client';
 
 my $queue_probe =
     Unblock::HTTP3::_Native::_consumer_queue_probe(
