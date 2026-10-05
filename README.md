@@ -41,7 +41,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-Unblock::HTTP3 0.02 requires:
+Unblock::HTTP3 0.03 requires:
 
 ```text
 Perl            5.20+
