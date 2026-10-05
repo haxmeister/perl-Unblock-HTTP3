@@ -1706,6 +1706,17 @@ sub request {
     $self->{transactions}{$stream_id} = $transaction;
 
     if (defined $stream_body) {
+        if (
+            defined($callbacks{on_drain})
+            && !exists($stream_body->{on_drain})
+        ) {
+            $stream_body->{on_drain} = sub {
+                my ($body) = @_;
+                my $result = $transaction->_invoke('on_drain');
+                die $result unless $result eq '1';
+            };
+        }
+
         $transaction->request_body(%$stream_body);
     }
 
@@ -2008,17 +2019,31 @@ sub _send_informational_response {
         'send_informational()',
     );
 
-    $self->_assert_peer_field_section_size_value(
-        $self->{native}->uniform_response_field_section_size($response),
-        'send_informational()',
-    );
+    if (ref($response) eq 'Uniform::HTTP::Response') {
+        $self->_assert_peer_field_section_size_value(
+            $self->{native}->uniform_response_field_section_size($response),
+            'send_informational()',
+        );
 
-    $self->{native}->submit_uniform_info(
-        $transaction->stream_id,
-        $response,
-    );
+        $self->{native}->submit_uniform_info(
+            $transaction->stream_id,
+            $response,
+        );
 
-    $response->freeze;
+        $response->freeze;
+    } else {
+        my $fields = _portable_response_fields($response);
+
+        $self->_assert_peer_field_section_size_value(
+            _field_section_size($fields),
+            'send_informational()',
+        );
+
+        $self->{native}->submit_info(
+            $transaction->stream_id,
+            $fields,
+        );
+    }
 
     $self->_drain_output;
     return $response;
@@ -3052,6 +3077,14 @@ sub _promote_accepted_early_transactions {
         }
 
         push @{ $self->{ready_transactions} }, $transaction;
+
+        if (defined $self->{callbacks}{on_request}) {
+            my $result = $transaction->_invoke(
+                'on_request',
+                $transaction->request,
+            );
+            die $result unless $result eq '1';
+        }
     }
 
     return 1;
