@@ -9,7 +9,7 @@ use File::Spec ();
 use Unblock::HTTP3 ();
 use Unblock::HTTP3::_Native ();
 
-our $VERSION = '0.03';
+our $VERSION = $Unblock::HTTP3::VERSION;
 
 use constant ABI_VERSION   => 1;
 use constant TX_ACTIVE     => 0;
@@ -73,7 +73,7 @@ This module exposes the optional native consumer ABI for XS event frameworks
 and HTTP libraries.
 
 The normal Perl API remains the portable interface. Native consumers may keep
-one persistent ABI context for a C<Unblock::HTTP3::Connection> and use C
+one persistent ABI context for an exact C<Unblock::HTTP3::Client> or C<Unblock::HTTP3::Server> and use C
 function pointers for the common connection and transaction path.
 
 The ABI does not expose libnghttp3 structures or private Unblock::HTTP3
@@ -96,9 +96,7 @@ current operations address.
 Consumers must check both C<abi_version> and C<struct_size> before
 dereferencing operations.
 
-ABI version 1 accepts exact C<Unblock::HTTP3::Connection> and
-C<Unblock::HTTP3::Transaction> objects. Subclasses should use the portable
-Perl API.
+ABI version 1 accepts exact C<Unblock::HTTP3::Client>, C<Unblock::HTTP3::Server>, and C<Unblock::HTTP3::Transaction> objects. Subclasses and adapters use the portable Perl API.
 
 =head1 HEADER
 
@@ -117,8 +115,8 @@ generate a private copy.
 
 ABI version 1 provides operations to:
 
-    create and destroy a persistent Connection context
-    service a Connection
+    create and destroy a persistent Client or Server context
+    service the Client or Server
     submit a normal client request
     poll ready Transactions
     poll informational response events
@@ -127,9 +125,7 @@ ABI version 1 provides operations to:
     send normal and informational server responses
     inspect Connection failure state
 
-C<request()> uses the normal request defaults. Advanced Perl-only request
-options such as streaming body configuration remain available through the
-portable API.
+C<request()> uses the normal request defaults. Callback configuration and advanced streaming-body objects remain available through the portable API.
 
 =head1 OWNERSHIP
 
