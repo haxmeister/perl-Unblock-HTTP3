@@ -48,6 +48,25 @@ The operations table is available through:
 Consumers must verify both the ABI version and structure size before using the
 table.
 
+ABI version 1 accepts exact `Unblock::HTTP3::Connection` and
+`Unblock::HTTP3::Transaction` objects. Subclasses should use the portable
+Perl API.
+
+A C consumer casts the discovered address only after those checks:
+
+    const ub_http3_consumer_ops_v1 *ops =
+        INT2PTR(
+            const ub_http3_consumer_ops_v1 *,
+            operations_address
+        );
+
+    if (
+        ops->abi_version != UB_HTTP3_CONSUMER_ABI_VERSION
+        || ops->struct_size < sizeof(ub_http3_consumer_ops_v1)
+    ) {
+        croak("incompatible Unblock::HTTP3 native ABI");
+    }
+
 ABI version 1 is:
 
     UB_HTTP3_CONSUMER_ABI_VERSION 1
