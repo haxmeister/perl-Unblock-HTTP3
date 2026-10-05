@@ -1,6 +1,7 @@
 use strict;
 use warnings;
 
+use Scalar::Util qw(refaddr);
 use Test2::V0;
 
 use Uniform::HTTP::Request;
@@ -158,10 +159,12 @@ my $advanced_body = $advanced_transaction->request_body(
 );
 
 is(
-    $advanced_transaction->request_body(
-        on_cancel => sub { },
+    refaddr(
+        $advanced_transaction->request_body(
+            on_cancel => sub { },
+        ),
     ),
-    $advanced_body,
+    refaddr($advanced_body),
     'advanced Body::Stream callbacks can be configured after common stream_body setup',
 );
 
