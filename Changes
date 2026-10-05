@@ -26,6 +26,8 @@ Revision history for Unblock-HTTP3
       and Transaction objects; subclasses and adapters use the portable path.
     - Normalize NativeABI discovery around definition(), native_include_dir(),
       header_path(), and c_header().
+    - Rename the native final-response operation from send_response to respond
+      so the installed C header uses the same 0.10 vocabulary.
     - Add staged-install coverage that verifies the public NativeABI header is
       installed and compiles for an external C consumer.
     - Keep HTTP/3-specific Datagrams, Capsules, Extended CONNECT, priorities,
