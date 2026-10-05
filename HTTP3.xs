@@ -4416,35 +4416,6 @@ submit_info(self, stream_id, fields)
         }
 
 void
-submit_trailers(self, stream_id, fields)
-    SV *self
-    IV stream_id
-    SV *fields
-    PREINIT:
-        unblock_http3_native_conn *native;
-        nghttp3_nv *nva;
-        size_t nvlen;
-        int rv;
-    CODE:
-        native = unblock_http3_conn_from_sv(self);
-        nva = unblock_http3_fields_from_sv(fields, &nvlen);
-
-        rv = nghttp3_conn_submit_trailers(
-            native->conn,
-            (int64_t)stream_id,
-            nva,
-            nvlen
-        );
-
-        if (nva != NULL) {
-            Safefree(nva);
-        }
-
-        if (rv != 0) {
-            unblock_http3_fail("could not submit HTTP/3 trailers", rv);
-        }
-
-void
 submit_response(self, stream_id, fields, body = &PL_sv_undef, streaming = 0)
     SV *self
     IV stream_id
