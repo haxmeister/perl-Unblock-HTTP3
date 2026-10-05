@@ -3027,6 +3027,64 @@ _consumer_context_probe(connection)
 
 
 SV *
+_consumer_transaction_probe(transaction)
+    SV *transaction
+    PREINIT:
+        AV *out;
+        SV *request;
+        SV *response;
+        SV *informational;
+    CODE:
+        request =
+            unblock_http3_consumer_operations.transaction_request(
+                aTHX_ transaction
+            );
+        response =
+            unblock_http3_consumer_operations.transaction_response(
+                aTHX_ transaction
+            );
+        informational =
+            unblock_http3_consumer_operations.transaction_next_informational(
+                aTHX_ transaction
+            );
+
+        out = newAV();
+        av_push(
+            out,
+            newSViv(
+                (IV)unblock_http3_consumer_operations.transaction_stream_id(
+                    aTHX_ transaction
+                )
+            )
+        );
+        av_push(
+            out,
+            newSVuv(
+                (UV)unblock_http3_consumer_operations.transaction_state(
+                    aTHX_ transaction
+                )
+            )
+        );
+        av_push(out, newSVsv(request));
+        av_push(
+            out,
+            response == NULL
+                ? newSV(0)
+                : newSVsv(response)
+        );
+        av_push(
+            out,
+            informational == NULL
+                ? newSV(0)
+                : informational
+        );
+
+        RETVAL = newRV_noinc((SV *)out);
+    OUTPUT:
+        RETVAL
+
+
+SV *
 _parse_priority(value)
     SV *value
     PREINIT:
