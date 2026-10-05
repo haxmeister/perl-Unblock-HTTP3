@@ -275,7 +275,7 @@ my $early_client_tx = $second_client_h3->request(
     $early_request,
     early_data  => 1,
     datagrams   => 1,
-    stream_body => {},
+    stream_body => 1,
 );
 
 ok($early_client_tx->early_data,
