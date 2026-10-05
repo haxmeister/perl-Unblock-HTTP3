@@ -786,9 +786,19 @@ sub write {
     my $connection = $self->{connection}
         or croak 'write(): Transaction no longer has a connection';
 
-    my $body = $connection->role eq 'client'
-        ? $self->request_body
-        : $self->response_body;
+    my $body;
+
+    if ($connection->role eq 'client') {
+        croak 'write(): request was not opened with stream_body'
+            unless $self->{request_streaming};
+        $body = $self->request_body;
+    } else {
+        croak 'write(): respond() was not called with stream_body'
+            unless $self->{response_streaming}
+                && $self->{response_output_started};
+        $body = $self->{response_body}
+            or croak 'write(): streaming response body is unavailable';
+    }
 
     return $body->write($bytes);
 }
@@ -804,9 +814,19 @@ sub end {
     my $connection = $self->{connection}
         or croak 'end(): Transaction no longer has a connection';
 
-    my $body = $connection->role eq 'client'
-        ? $self->request_body
-        : $self->response_body;
+    my $body;
+
+    if ($connection->role eq 'client') {
+        croak 'end(): request was not opened with stream_body'
+            unless $self->{request_streaming};
+        $body = $self->request_body;
+    } else {
+        croak 'end(): respond() was not called with stream_body'
+            unless $self->{response_streaming}
+                && $self->{response_output_started};
+        $body = $self->{response_body}
+            or croak 'end(): streaming response body is unavailable';
+    }
 
     $body->complete(@args);
     return $self;
