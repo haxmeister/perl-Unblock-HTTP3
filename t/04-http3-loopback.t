@@ -9,7 +9,9 @@ use Test2::V0;
 use Time::HiRes qw(time);
 
 use Unblock::HTTP3::Capsule;
+use Unblock::HTTP3::Client;
 use Unblock::HTTP3::Connection;
+use Unblock::HTTP3::Server;
 use Net::QUIC;
 use Net::QUIC::Driver;
 use Uniform::HTTP::Request;
@@ -192,7 +194,7 @@ my $client_extension_stream_data = '';
 my $client_extension_stream_ended = 0;
 my $server_extension_stream;
 
-my $client_h3 = Unblock::HTTP3::Connection->client(
+my $client_h3 = Unblock::HTTP3::Client->new(
     quic              => $client_quic,
     send_buffer_limit => 4096,
     extension_settings => {
@@ -231,7 +233,7 @@ my $client_h3 = Unblock::HTTP3::Connection->client(
         },
     },
 );
-my $server_h3 = Unblock::HTTP3::Connection->server(
+my $server_h3 = Unblock::HTTP3::Server->new(
     quic                    => $server_quic,
     send_buffer_limit       => 4096,
     max_field_section_size  => 1024,
@@ -598,7 +600,7 @@ $outgoing_response->status(200);
 $outgoing_response->add_header(cookie => 'response-one=1');
 $outgoing_response->add_header('x-response' => 'preserved');
 $outgoing_response->add_header(cookie => 'response-two=2');
-$server_transaction->send_response;
+$server_transaction->respond($server_transaction->response);
 
 my $incoming_response;
 
@@ -709,7 +711,7 @@ my $body_response = $body_server_tx->response;
 
 $body_response->header('content-type', 'text/plain');
 $body_response->body($response_body);
-$body_server_tx->send_response;
+$body_server_tx->respond($body_server_tx->response);
 
 my $received_body_response;
 
@@ -790,7 +792,7 @@ ok(
     'server receives incremental request body as one complete message',
 );
 
-$stream_request_server_tx->send_response;
+$stream_request_server_tx->respond($stream_request_server_tx->response);
 
 ok(
     run_until(sub {
@@ -977,7 +979,7 @@ is(
 is($request_reader->pending_bytes, 0,
     'server reader returns all queued receive credit');
 
-$receive_stream_server_tx->send_response;
+$receive_stream_server_tx->respond($receive_stream_server_tx->response);
 
 ok(
     run_until(sub {
@@ -1127,7 +1129,7 @@ is(
 my $trailer_response = $trailer_server_tx->response;
 $trailer_response->body('response with trailers');
 $trailer_response->add_trailer('x-response-checksum', 'def456');
-$trailer_server_tx->send_response;
+$trailer_server_tx->respond($trailer_server_tx->response);
 
 my $received_trailer_response;
 
@@ -1185,7 +1187,7 @@ ok(
 for my $tx (reverse @multi_server_tx) {
     my $path = $tx->request->target;
     $tx->response->body("response:$path");
-    $tx->send_response;
+    $tx->respond($tx->response);
 }
 
 ok(
@@ -1250,7 +1252,7 @@ is($uniform_server_tx->request->target, '/uniform-direct',
     'plain Uniform request semantics survive the HTTP/3 wire path');
 
 $uniform_server_tx->response->status(204);
-$uniform_server_tx->send_response;
+$uniform_server_tx->respond($uniform_server_tx->response);
 
 ok(
     run_until(sub {
@@ -1311,7 +1313,7 @@ ok($uniform_stream_client_tx->request->is_complete,
     'outgoing Uniform Request becomes complete when body production finishes');
 
 $uniform_stream_server_tx->response->status(204);
-$uniform_stream_server_tx->send_response;
+$uniform_stream_server_tx->respond($uniform_stream_server_tx->response);
 
 ok(
     run_until(sub {
@@ -1473,7 +1475,7 @@ is($unsupported_server_tx->protocol, 'unsupported-protocol',
     'application can inspect an unsupported protocol identifier');
 
 $unsupported_server_tx->response->status(501);
-$unsupported_server_tx->send_response;
+$unsupported_server_tx->respond($unsupported_server_tx->response);
 
 ok(
     run_until(sub {
@@ -1808,7 +1810,7 @@ ok(
 );
 
 $rejected_server_tx->response->status(403);
-$rejected_server_tx->send_response;
+$rejected_server_tx->respond($rejected_server_tx->response);
 
 ok(
     run_until(sub {
@@ -1990,7 +1992,7 @@ ok(
     'server accepts another request after malformed stream rejection',
 );
 
-$after_malformed_server_tx->send_response;
+$after_malformed_server_tx->respond($after_malformed_server_tx->response);
 
 ok(
     run_until(sub {
