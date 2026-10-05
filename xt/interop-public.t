@@ -11,6 +11,7 @@ use Test2::V0;
 use Time::HiRes qw(time);
 
 use Net::QUIC::Driver;
+use Unblock::HTTP3::Client;
 use Unblock::HTTP3::Connection;
 use Uniform::HTTP::Request;
 
@@ -194,7 +195,7 @@ sub run_target {
         'QUIC/TLS handshake completes with h3 ALPN',
     ) or return;
 
-    my $h3 = Unblock::HTTP3::Connection->client(
+    my $h3 = Unblock::HTTP3::Client->new(
         quic         => $quic,
         receive_body => 'stream',
     );
