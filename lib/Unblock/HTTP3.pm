@@ -19,7 +19,6 @@ Unblock::HTTP3 - non-blocking HTTP/3 protocol engine for Perl
 
 =head1 SYNOPSIS
 
-    use Uniform::HTTP::Request;
     use Unblock::HTTP3::Client;
 
     my $client = Unblock::HTTP3::Client->new(
@@ -29,12 +28,10 @@ Unblock::HTTP3 - non-blocking HTTP/3 protocol engine for Perl
     $client->start;
 
     my $transaction = $client->request(
-        Uniform::HTTP::Request->new(
-            method    => 'GET',
-            target    => '/',
-            scheme    => 'https',
-            authority => 'example.com',
-        ),
+        method    => 'GET',
+        target    => '/',
+        scheme    => 'https',
+        authority => 'example.com',
         on_response => sub {
             my ($transaction, $response) = @_;
             print $response->status, "\n";

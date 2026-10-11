@@ -22,7 +22,6 @@ Unblock::HTTP3::Server - one server HTTP/3 connection
 
 =head1 SYNOPSIS
 
-    use Uniform::HTTP::Response;
     use Unblock::HTTP3::Server;
 
     my $server = Unblock::HTTP3::Server->new(
@@ -32,10 +31,8 @@ Unblock::HTTP3::Server - one server HTTP/3 connection
             my ($transaction, $request) = @_;
 
             $transaction->respond(
-                Uniform::HTTP::Response->new(
-                    status => 200,
-                    body   => "hello\n",
-                ),
+                status => 200,
+                body   => "hello\n",
             );
         },
     );

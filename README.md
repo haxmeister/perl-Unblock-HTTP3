@@ -80,7 +80,6 @@ subclasses use the portable Perl message contract.
 ## Client
 
 ```perl
-use Uniform::HTTP::Request;
 use Unblock::HTTP3::Client;
 
 my $client = Unblock::HTTP3::Client->new(
@@ -90,12 +89,10 @@ my $client = Unblock::HTTP3::Client->new(
 $client->start;
 
 my $transaction = $client->request(
-    Uniform::HTTP::Request->new(
-        method    => 'GET',
-        target    => '/',
-        scheme    => 'https',
-        authority => 'example.com',
-    ),
+    method    => 'GET',
+    target    => '/',
+    scheme    => 'https',
+    authority => 'example.com',
 
     on_response => sub {
         my ($transaction, $response) = @_;
@@ -122,7 +119,6 @@ and `next_informational()` for integrations that prefer polling.
 ## Server
 
 ```perl
-use Uniform::HTTP::Response;
 use Unblock::HTTP3::Server;
 
 my $server = Unblock::HTTP3::Server->new(
@@ -132,10 +128,8 @@ my $server = Unblock::HTTP3::Server->new(
         my ($transaction, $request) = @_;
 
         $transaction->respond(
-            Uniform::HTTP::Response->new(
-                status => 200,
-                body   => "hello\n",
-            ),
+            status => 200,
+            body   => "hello\n",
         );
     },
 );
@@ -191,11 +185,7 @@ callbacks without changing the common Transaction API.
 A server can send a 1xx response before the final response:
 
 ```perl
-$transaction->send_informational(
-    Uniform::HTTP::Response->new(
-        status => 103,
-    ),
-);
+$transaction->send_informational(status => 103);
 
 $transaction->respond($final_response);
 ```

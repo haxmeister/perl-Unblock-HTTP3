@@ -527,7 +527,18 @@ sub next_informational {
 }
 
 sub send_informational {
-    my ($self, $response) = @_;
+    my ($self, @arg) = @_;
+
+    my $response;
+    if (@arg && ref($arg[0])) {
+        croak 'send_informational(): response object does not take options'
+            unless @arg == 1;
+        $response = $arg[0];
+    } else {
+        croak 'send_informational(): fields must be key/value pairs'
+            if @arg % 2;
+        $response = Uniform::HTTP::Response->new(@arg);
+    }
 
     croak 'send_informational(): Transaction is already terminal'
         if $self->is_terminal;
@@ -702,7 +713,21 @@ sub response_body {
 }
 
 sub respond {
-    my ($self, $response, %option) = @_;
+    my ($self, @arg) = @_;
+
+    my ($response, %option);
+    if (@arg && ref($arg[0])) {
+        $response = shift @arg;
+        croak 'respond(): options must be key/value pairs' if @arg % 2;
+        %option = @arg;
+    } else {
+        croak 'respond(): fields must be key/value pairs' if @arg % 2;
+        my %field = @arg;
+        for my $name (qw(stream_body on_drain on_error)) {
+            $option{$name} = delete $field{$name} if exists $field{$name};
+        }
+        $response = Uniform::HTTP::Response->new(%field);
+    }
 
     croak 'respond(): Transaction is already terminal'
         if $self->is_terminal;
@@ -1161,7 +1186,11 @@ engines:
     end
     send_informational
 
-A server sends a final response with:
+A server sends a final response with named fields:
+
+    $transaction->respond(status => 200, body => "hello\n");
+
+An existing Uniform-compatible Response object is also accepted:
 
     $transaction->respond($response);
 
@@ -1178,8 +1207,9 @@ For a streaming response:
 A client request opened with C<stream_body =E<gt> 1> uses the same C<write()>
 and C<end()> methods.
 
-C<send_informational($response)> sends a server-side 1xx response before the
-final response. HTTP/3 does not use status 101.
+C<send_informational(status =E<gt> 103)> sends a server-side 1xx response
+before the final response. It also accepts a Uniform-compatible Response
+object. HTTP/3 does not use status 101.
 
 =head1 ADVANCED BODY API
 
