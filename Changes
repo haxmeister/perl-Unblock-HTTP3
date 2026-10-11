@@ -1,5 +1,17 @@
 Revision history for Unblock-HTTP3
 
+0.11  2026-10-10
+    - Accept named request fields directly in Client->request(), including
+      callbacks and HTTP/3-specific request options.
+    - Accept named response fields in Transaction->respond() and
+      send_informational(), retaining Uniform object forms.
+    - Exercise the new application API across real UDP, QUIC, TLS and
+      HTTP/3 in the existing loopback regression suite.
+    - Add an installed Integration guide and complete Linux::Event HTTP/3
+      client/server examples using Net::QUIC::Driver.
+    - Document Client and Server callbacks, body streaming and ownership.
+    - Keep HTTP/3 protocol behavior and the native consumer ABI unchanged.
+
 0.10  2026-10-04
     - Make a deliberate breaking API harmonization pass across Unblock::HTTP3.
     - Add Unblock::HTTP3::Client and Unblock::HTTP3::Server with new().

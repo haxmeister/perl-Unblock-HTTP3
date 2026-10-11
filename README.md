@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-Unblock::HTTP3 0.10 requires:
+Unblock::HTTP3 0.11 requires:
 
 ```text
 Perl            5.20+
@@ -45,7 +45,11 @@ Net::QUIC       0.04+
 Uniform::HTTP   0.06+
 ```
 
-Version 0.10 intentionally breaks the earlier 0.03 Perl API. Client and Server
+Version 0.11 adds the same named-field Client request, Transaction response,
+and informational response forms as the HTTP1 and HTTP2 engines. Existing
+Uniform::HTTP objects remain fully supported.
+
+Version 0.10 intentionally broke the earlier 0.03 Perl API. Client and Server
 now use `new()`, final responses use `respond()`, and the old
 `Connection->client()`, `Connection->server()`, and `send_response()`
 entry points are removed. There are no compatibility aliases.
