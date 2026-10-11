@@ -5,7 +5,7 @@ use warnings;
 
 use parent 'Unblock::HTTP3::Connection';
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 sub new {
     my ($class, %option) = @_;

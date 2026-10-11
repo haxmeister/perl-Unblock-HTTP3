@@ -5,7 +5,7 @@ use warnings;
 
 use Unblock::HTTP3 ();
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 sub nghttp3_version {
     return _nghttp3_version();
