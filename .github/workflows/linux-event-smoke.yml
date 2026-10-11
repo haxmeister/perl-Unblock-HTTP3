@@ -1,0 +1,85 @@
+name: Linux::Event HTTP/3 smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "examples/linux-event-client.pl"
+      - "examples/linux-event-server.pl"
+      - "lib/Unblock/HTTP3/Integration.pm"
+      - ".github/workflows/linux-event-smoke.yml"
+
+jobs:
+  linux-event:
+    name: Linux::Event example loopback
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: "5.44"
+          enable-modules-cache: false
+
+      - name: Install dependencies and optional Linux::Event
+        run: |
+          cpanm --notest 'Alien::nghttp3@0.01'
+          cpanm --notest 'Net::QUIC@0.04'
+          cpanm --notest 'Uniform::HTTP@0.06'
+          cpanm --notest 'Linux::Event@0.117'
+          cpanm --notest --installdeps .
+
+      - name: Build HTTP/3
+        run: |
+          perl Makefile.PL
+          perl -MConfig -e 'system($Config{make}) == 0 or exit 1'
+
+      - name: Check example syntax
+        run: |
+          perl -Iblib/lib -Iblib/arch -c examples/linux-event-server.pl
+          perl -Iblib/lib -Iblib/arch -c examples/linux-event-client.pl
+
+      - name: Run real UDP, QUIC, TLS, HTTP/3 example
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PERL5LIB="$PWD/blib/lib:$PWD/blib/arch"
+          PORT=34443
+
+          perl examples/linux-event-server.pl \
+            127.0.0.1 "$PORT" \
+            t/fixtures/localhost-cert.pem \
+            t/fixtures/localhost-key.pem \
+            >server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+
+          sleep 1
+          if ! kill -0 "$server_pid" 2>/dev/null; then
+            cat server.log
+            exit 1
+          fi
+
+          if ! timeout 25s perl examples/linux-event-client.pl \
+              127.0.0.1 "$PORT" t/fixtures/localhost-cert.pem \
+              >client.log 2>&1; then
+            cat client.log
+            cat server.log
+            exit 1
+          fi
+
+          cat client.log
+          grep -F 'HTTP/3 200' client.log
+          grep -F 'Hello from HTTP/3' client.log
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-event-http3-smoke
+          path: |
+            client.log
+            server.log
+          if-no-files-found: ignore
