@@ -1,56 +1,55 @@
 # Unblock::HTTP3 handoff
 
-## Current work
+## Current state
 
-Branch: feature/api-parity-0.11
-Base: main at aade7344a3e62a0cbc7a3b78e9471681b1c526f4
+Branch: main
+Version: 0.11 prepared, not tagged or published
+Last completed work: HTTP1/HTTP2 application API harmonization and release audit
 
-Goal: align the HTTP/3 application API with the released HTTP1/HTTP2
-Client, Server and Transaction APIs without replacing the QUIC transport
-integration with a false TCP-style byte-stream abstraction.
+## Implemented in 0.11
 
-## Implemented
+- Client->request() accepts named Uniform::HTTP request fields or an
+  existing Uniform-compatible Request object.
+- Transaction->respond() and send_informational() accept named response
+  fields or existing Uniform-compatible Response objects.
+- Request and response callback options remain separate from message fields.
+- write(), end(), lifecycle methods, streaming body APIs, Datagrams, Capsules,
+  Extended CONNECT, 0-RTT and priority remain supported.
+- Native ABI, libnghttp3 implementation and Net::QUIC boundary were not changed.
+- Client, Server and Integration POD, README, Changes and examples were updated.
+- Linux::Event UDP+timer client/server examples use Net::QUIC::Driver and
+  separate application handlers from adapter code.
 
-- Client->request() accepts named Uniform HTTP fields and per-request
-  callbacks/options, or an existing Uniform-compatible Request object.
-- Transaction->respond() accepts named response fields or an existing
-  Uniform-compatible Response object.
-- Transaction->send_informational() accepts named fields or a Response
-  object. HTTP/3 still rejects status 101.
-- Existing Transaction->write(), end(), lifecycle methods, streaming
-  Body::Stream / Body::Reader, HTTP Datagram, Capsule and 0-RTT APIs remain.
-- Native ABI, libnghttp3 binding, and Net::QUIC boundary are unchanged.
-- Version is prepared as 0.11; Changes, test expectations, and CI dist
-  paths have been updated.
-- The README, Client and Server POD, and docs/APPLICATION-API.md explain
-  the common application API.
-- Installed Unblock::HTTP3::Integration POD explains Net::QUIC::Driver,
-  UDP, timers and backpressure.
-- Complete Linux::Event client/server examples show real integration
-  code separated from application callbacks.
-- t/22-named-arguments.t tests named fields, callback option separation,
-  object identity and argument validation.
-- Existing t/04-http3-loopback.t now runs the named forms through real
-  UDP, QUIC, TLS and HTTP/3.
+## Release audit
 
-## Test and release work
+- The 0.11 code was merged into main by fast-forward from
+  feature/api-parity-0.11 at commit 6592d5378a18e2c76c4b75e227a267a0b1f5b68f.
+- The regular test workflow passed on Perl 5.20, 5.28, 5.36 and 5.44.
+- The 5.44 job includes distcheck, disttest, POD syntax and installed
+  NativeABI/header checks.
+- Real QUIC/TLS/UDP loopback exercises named API forms (t/04).
+- Optional Linux::Event live client/server smoke workflow added on main.
+  Run 38105724701 passed against released Linux::Event 0.117. It compiled
+  both examples and returned HTTP/3 200 / Hello from HTTP/3.
+- Package MANIFEST includes examples, tests, API guide and installed
+  Integration.pm; MANIFEST.SKIP keeps Handoff.md out of CPAN archives.
+- An external-client / public server interoperability workflow exists but
+  was not rerun for 0.11. This is a follow-up check before tagging when
+  independent peer interoperability is desired.
 
-GitHub Actions runs tests on Perl 5.20, 5.28, 5.36, and 5.44,
-including distcheck, disttest and installed NativeABI checks on 5.44.
-Check that the HEAD branch workflow is green before merging.
+## Next steps
 
-The Linux::Event example scripts rely on the separately maintained
-Linux::Event distribution and are not executed by the standard HTTP/3
-dependency-only CI job. They require a separate runtime smoke test.
+1. Confirm the final main-branch test workflow after any audit-only commits.
+2. Optionally dispatch the HTTP/3 interoperability workflow for 0.11.
+3. Do not create a tag, publish to GitHub Releases or upload to CPAN
+   without explicit user direction.
 
-Do not merge, tag, publish to CPAN or modify another repository without
-explicit user approval.
+## Design boundary
 
-## Design reminders
-
-- There is one HTTP/3 Client or Server per QUIC connection.
-- Net::QUIC::Driver owns packet output and timers. Do not duplicate it.
-- A normal HTTP/3 start happens after the QUIC handshake is ready.
-- HTTP/3 installs stream callbacks; an adapter must not overwrite them.
-- Uniform::HTTP stays pure Perl, with its native fast path in the engine.
-- Handoff.md stays repository-only, excluded from the CPAN manifest.
+- Modify only Unblock::HTTP3 in this workstream.
+- One HTTP/3 Client or Server belongs to one Net::QUIC connection.
+- Use Net::QUIC::Driver for QUIC packet output, timers and backpressure.
+- Start ordinary HTTP/3 operation after QUIC handshake readiness.
+- HTTP/3 owns QUIC stream callbacks after start; do not overwrite them.
+- Keep Uniform::HTTP pure Perl; preserve optional native fast paths in engines.
+- Handoff.md is repository-only, never part of CPAN distribution.
