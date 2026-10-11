@@ -6,6 +6,12 @@ on:
     paths:
       - "xt/interop-public.t"
       - "xt/interop-external-client.t"
+      - "HTTP3.xs"
+      - "lib/Unblock/HTTP3.pm"
+      - "lib/Unblock/HTTP3/Client.pm"
+      - "lib/Unblock/HTTP3/Server.pm"
+      - "lib/Unblock/HTTP3/Transaction.pm"
+      - "lib/Unblock/HTTP3/Connection.pm"
       - ".github/workflows/interop.yml"
 
 jobs:
