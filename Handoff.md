@@ -33,16 +33,17 @@ Last completed work: HTTP1/HTTP2 application API harmonization and release audit
   both examples and returned HTTP/3 200 / Hello from HTTP/3.
 - Package MANIFEST includes examples, tests, API guide and installed
   Integration.pm; MANIFEST.SKIP keeps Handoff.md out of CPAN archives.
-- An external-client / public server interoperability workflow exists but
-  was not rerun for 0.11. This is a follow-up check before tagging when
-  independent peer interoperability is desired.
+- The 0.11 interoperability workflow passed both independent quic-go
+  client -> Unblock server and Unblock client -> public HTTP/3 servers.
+  GitHub Actions run 38105824175 completed successfully.
+- The normal main-branch CI passed on all four supported Perl test versions
+  after the interoperability trigger update (run 38105824198).
 
 ## Next steps
 
-1. Confirm the final main-branch test workflow after any audit-only commits.
-2. Optionally dispatch the HTTP/3 interoperability workflow for 0.11.
-3. Do not create a tag, publish to GitHub Releases or upload to CPAN
-   without explicit user direction.
+1. Review the release notes and final change summary with the user.
+2. Tag and publish 0.11 to GitHub and CPAN only on explicit user direction.
+3. Keep Handoff.md out of CPAN distributions.
 
 ## Design boundary
 
