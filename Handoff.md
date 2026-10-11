@@ -4,7 +4,7 @@
 
 Branch: main
 Version: 0.12 prepared, not tagged or published
-Last completed work: PAUSE index-metadata correction and 0.12 release preparation
+Last completed work: PAUSE metadata fix and successful 0.12 release audit
 
 ## 0.12 changes
 
@@ -25,21 +25,29 @@ Last completed work: PAUSE index-metadata correction and 0.12 release preparatio
 - The 0.12 NativeABI fix addresses the version regression, not the independent
   PAUSE database error. Confirm PAUSE indexing health after release.
 
-## Previous 0.11 verification
+## 0.12 release audit
 
-- Full test matrix passed on Perl 5.20, 5.28, 5.36, and 5.44.
-- GitHub Actions 38105824198 passed; interop run 38105824175 passed.
-- distcheck, disttest, POD syntax, installed header, live Linux::Event
-  UDP/QUIC examples, and external interop were previously verified.
-- These results pertain to 0.11, not fresh 0.12 runs.
+- GitHub Actions test run 38171242419 passed on Perl 5.20, 5.28,
+  5.36, and 5.44.
+- Perl 5.44 passed distcheck, disttest, POD syntax, staged installation,
+  and the installed NativeABI/header checks.
+- t/23-pause-indexing.t passed both the source test run and disttest
+  from the generated Unblock-HTTP3-0.12 distribution.
+- GitHub Actions interop run 38171242402 passed the external quic-go
+  client and public HTTP/3 server checks.
+- Linux::Event live example run 38171242376 passed.
+- MANIFEST includes the new regression test; MANIFEST.SKIP excludes
+  Handoff.md and repository-only release notes.
+- The previous 0.11 PAUSE database error cannot be validated from CI.
+  Check PAUSE separately after upload.
+- This is ready for a 0.12 GitHub/CPAN release once the user elects to
+  tag and publish it.
 
 ## Next steps
 
-1. Verify 0.12 GitHub CI: module test matrix, distcheck, disttest,
-   POD syntax, staged installation, and NativeABI header checks.
-2. Confirm generated META.json provides version 0.12 for NativeABI.
-3. Tag and upload 0.12 only after the audit is complete on user instruction.
-4. Verify PAUSE indexing; email modules@perl.org if its database failure recurs.
+1. Tag v0.12 and upload Unblock-HTTP3-0.12.tar.gz when authorized.
+2. Verify PAUSE's 0.12 indexing email, particularly NativeABI 0.12.
+3. Contact modules@perl.org if the PAUSE database update error recurs.
 
 ## Design boundary
 
