@@ -140,6 +140,18 @@ $server->start;
 `on_body` receives request body chunks. `on_request_end` runs after the
 request body and trailers have completed.
 
+## Event-loop integration
+
+Use Net::QUIC::Driver to connect an event loop's UDP socket and timer to
+QUIC. Unblock::HTTP3 attaches to each ready Net::QUIC::Connection; it does not
+replace the Driver or accept raw TCP-style input bytes.
+
+See [the installed integration guide](lib/Unblock/HTTP3/Integration.pm) and
+[the application API guide](docs/APPLICATION-API.md). Complete Linux::Event
+programs are in [server](examples/linux-event-server.pl) and
+[client](examples/linux-event-client.pl). The transport examples require
+Linux::Event 0.117 or later, but it is not a distribution dependency.
+
 ## Streaming bodies
 
 Buffered bodies can live directly on the Uniform message object.

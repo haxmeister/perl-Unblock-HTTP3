@@ -10,6 +10,7 @@ use Unblock::HTTP3::Capsule;
 use Unblock::HTTP3::Capsule::Parser;
 use Unblock::HTTP3::Capsule::Stream;
 use Unblock::HTTP3::Client;
+use Unblock::HTTP3::Integration;
 use Unblock::HTTP3::Connection;
 use Unblock::HTTP3::Server;
 use Unblock::HTTP3::Extension::Stream;
@@ -28,6 +29,7 @@ my @versioned_modules = (
     [ 'Unblock::HTTP3::Capsule::Parser', $Unblock::HTTP3::Capsule::Parser::VERSION ],
     [ 'Unblock::HTTP3::Capsule::Stream', $Unblock::HTTP3::Capsule::Stream::VERSION ],
     [ 'Unblock::HTTP3::Client',       $Unblock::HTTP3::Client::VERSION ],
+    [ 'Unblock::HTTP3::Integration',  $Unblock::HTTP3::Integration::VERSION ],
     [ 'Unblock::HTTP3::Connection',   $Unblock::HTTP3::Connection::VERSION ],
     [ 'Unblock::HTTP3::Server',       $Unblock::HTTP3::Server::VERSION ],
     [ 'Unblock::HTTP3::Extension::Stream', $Unblock::HTTP3::Extension::Stream::VERSION ],

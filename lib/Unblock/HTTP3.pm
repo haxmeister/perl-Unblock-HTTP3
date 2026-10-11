@@ -72,6 +72,10 @@ One client HTTP/3 connection over an existing Net::QUIC connection.
 
 One server HTTP/3 connection over an existing Net::QUIC connection.
 
+=item L<Unblock::HTTP3::Integration>
+
+Event-loop and QUIC Driver integration guide, with complete examples.
+
 =item L<Unblock::HTTP3::Transaction>
 
 One HTTP request/response transaction carried by an HTTP/3 request stream.

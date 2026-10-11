@@ -122,6 +122,10 @@ WriteMakefile(
                 file    => 'lib/Unblock/HTTP3/Extension/Stream.pm',
                 version => MM->parse_version('lib/Unblock/HTTP3/Extension/Stream.pm'),
             },
+            'Unblock::HTTP3::Integration' => {
+                file    => 'lib/Unblock/HTTP3/Integration.pm',
+                version => MM->parse_version('lib/Unblock/HTTP3/Integration.pm'),
+            },
             'Unblock::HTTP3::Client' => {
                 file    => 'lib/Unblock/HTTP3/Client.pm',
                 version => MM->parse_version('lib/Unblock/HTTP3/Client.pm'),

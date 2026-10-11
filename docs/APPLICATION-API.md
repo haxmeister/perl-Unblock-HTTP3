@@ -55,5 +55,9 @@ contract used by Unblock::HTTP1 and Unblock::HTTP2 is *not* suitable for HTTP/3
 QUIC datagrams. The framework must instead integrate Net::QUIC correctly.
 Do not feed UDP packets directly to an HTTP/3 Client or Server.
 
+For the complete UDP and timer contract, read `Unblock::HTTP3::Integration`.
+Working Linux::Event examples are in `examples/linux-event-client.pl` and
+`examples/linux-event-server.pl`.
+
 `Body::Stream`, `Body::Reader`, priority, Datagram, Capsule, Extended CONNECT,
 and 0-RTT options remain available to advanced callers.
