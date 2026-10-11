@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-Unblock::HTTP3 0.11 requires:
+Unblock::HTTP3 0.12 requires:
 
 ```text
 Perl            5.20+
@@ -44,6 +44,9 @@ Alien::nghttp3  0.01+
 Net::QUIC       0.04+
 Uniform::HTTP   0.06+
 ```
+
+Version 0.12 fixes NativeABI version metadata for PAUSE indexing. The public
+API and protocol implementation are unchanged.
 
 Version 0.11 adds the same named-field Client request, Transaction response,
 and informational response forms as the HTTP1 and HTTP2 engines. Existing
