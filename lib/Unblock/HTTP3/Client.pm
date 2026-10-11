@@ -43,61 +43,99 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP3::Client - one client HTTP/3 connection
+Unblock::HTTP3::Client - one non-blocking HTTP/3 client connection
 
 =head1 SYNOPSIS
 
     use Unblock::HTTP3::Client;
 
-    my $client = Unblock::HTTP3::Client->new(
-        quic => $quic,
-    );
-
+    # $quic is a ready Net::QUIC::Connection.
+    my $client = Unblock::HTTP3::Client->new(quic => $quic);
     $client->start;
 
-    my $transaction = $client->request(
+    my $tx = $client->request(
         method    => 'GET',
         target    => '/',
         scheme    => 'https',
-        authority => 'example.com',
-
+        authority => 'localhost',
         on_response => sub {
-            my ($transaction, $response) = @_;
+            my ($tx, $response) = @_;
+            print $response->status, "\n";
         },
-
         on_body => sub {
-            my ($transaction, $response, $bytes) = @_;
+            my ($tx, $response, $bytes) = @_;
+            print $bytes;
         },
-
         on_complete => sub {
-            my ($transaction) = @_;
+            my ($tx) = @_;
+            print "complete\n";
+        },
+        on_error => sub {
+            my ($tx, $error, $code) = @_;
+            warn "HTTP/3 request failed: $error\n";
         },
     );
 
 =head1 DESCRIPTION
 
-A Client owns HTTP/3 protocol state for one existing L<Net::QUIC> connection.
+One Client owns HTTP/3 protocol state on one existing Net::QUIC connection.
+Several Transactions can run at once on the same connection.
 
-It does not own UDP sockets, TLS, timers, or an event loop.
+This class does not open UDP sockets, perform TLS handshakes, choose timers,
+or run an event loop. Use L<Unblock::HTTP3::Integration> to connect an event
+framework through Net::QUIC::Driver.
 
-C<request()> accepts named Uniform HTTP request fields or an existing
-Uniform-compatible Request object and returns an
-L<Unblock::HTTP3::Transaction>.
+HTTP/3 response messages are canonical Uniform::HTTP::Response objects.
 
-    $client->request(
-        method => 'GET', target => '/', scheme => 'https',
-        authority => 'example.com', on_response => sub { ... },
+=head1 CONSTRUCTOR
+
+=head2 new
+
+    my $client = Unblock::HTTP3::Client->new(
+        quic => $quic,
     );
 
-    $client->request($uniform_request, on_response => sub { ... });
+C<quic> is required and must be a L<Net::QUIC::Connection>.
 
-When named fields are used, HTTP/3 request options and callbacks are separated
-from message fields before building the Uniform Request. This includes
-C<stream_body>, C<receive_body>, C<datagrams>, and C<early_data>.
-HTTP/3 validation remains in the connection engine.
+Useful optional constructor settings include C<receive_body>,
+C<send_buffer_limit>, C<max_field_section_size>,
+C<max_buffered_body_bytes>, C<max_streaming_body_bytes>,
+C<qpack_max_table_capacity>, C<qpack_blocked_streams>,
+C<enable_http_datagrams>, and C<remembered_peer_settings>.
 
-Useful per-request callbacks are:
+The connection can be created before QUIC is ready, but for ordinary 1-RTT
+operation call C<start()> only after C<$quic-E<gt>ready> is true.
 
+=head1 REQUESTS
+
+=head2 request
+
+    my $tx = $client->request(
+        method    => 'GET',
+        target    => '/resource',
+        scheme    => 'https',
+        authority => 'example.com',
+        on_response => sub { ... },
+    );
+
+Returns an L<Unblock::HTTP3::Transaction>. Request fields are used to
+construct a canonical Uniform::HTTP::Request. The existing object form is
+also accepted:
+
+    my $tx = $client->request(
+        $uniform_request,
+        on_response => sub { ... },
+    );
+
+Object identity is retained for the object form. HTTP/3 validates request
+semantics, pseudo-headers and any explicit protocol version.
+
+The following keys are request options, not Uniform message fields:
+
+    stream_body
+    receive_body
+    datagrams
+    early_data
     on_informational
     on_response
     on_body
@@ -105,16 +143,111 @@ Useful per-request callbacks are:
     on_error
     on_drain
 
-Pass C<stream_body =E<gt> 1> to produce a request body with the Transaction
-C<write()> and C<end()> methods.
+C<stream_body =E<gt> 1> starts an outbound streaming request body. Do not
+combine it with an already-buffered request body.
 
-The pull interface remains available through C<next_transaction()> and
-C<next_informational()>.
+    my $tx = $client->request(
+        method => 'POST', target => '/upload', scheme => 'https',
+        authority => 'example.com', stream_body => 1,
+    );
+
+    $tx->write("first chunk");
+    $tx->end("final chunk");
+
+An C<on_body> callback automatically selects streaming response delivery.
+Without it, received response bodies are buffered on the Uniform message,
+unless C<receive_body> explicitly selects streaming mode. The advanced
+C<receive_body> hash form configures a Body::Reader.
+
+=head1 REQUEST CALLBACKS
+
+=over 4
+
+=item C<on_informational($tx, $response)>
+
+Called for 1xx response headers before a final response. HTTP/3 does not
+use status 101.
+
+=item C<on_response($tx, $response)>
+
+Called when final response headers arrive. The response body may still be
+incomplete at that point.
+
+=item C<on_body($tx, $response, $bytes)>
+
+Called for incoming response body chunks in streaming mode.
+
+=item C<on_complete($tx)>
+
+Called when the HTTP/3 Transaction has completed.
+
+=item C<on_error($tx, $error, $error_code)>
+
+Called when a Transaction fails. The numeric code is an HTTP/3 or stream
+diagnostic when one is available.
+
+=item C<on_drain($tx)>
+
+Used with C<stream_body =E<gt> 1>. Called when outbound body production can
+resume after backpressure.
+
+=back
+
+An application may also use the advanced pull and Body::Reader interfaces
+instead of the common callback style.
+
+=head1 CONNECTION METHODS
+
+=head2 start
+
+Starts HTTP/3 control streams and installs the QUIC stream-activity handlers.
+For ordinary requests, the Net::QUIC connection must be ready first.
+
+=head2 next_transaction
+
+Pulls the next Transaction available from the engine. The callback API does
+not require polling.
+
+=head2 next_informational
+
+Pulls the next informational-response notification when using the low-level
+polling interface.
+
+=head2 quic
+
+Returns the underlying Net::QUIC::Connection.
+
+=head2 started
+
+True once HTTP/3 has started.
+
+=head2 failed
+
+True if the HTTP/3 connection has failed.
+
+=head2 error
+
+Returns the HTTP/3 connection failure message, if any.
+
+=head2 error_code
+
+Returns the associated failure code, if any.
+
+=head1 HTTP/3 FEATURES
+
+HTTP Datagrams, Capsules, Extended CONNECT, priorities, and 0-RTT are
+supported through the connection or Transaction objects. Request 0-RTT
+requires an explicit C<early_data =E<gt> 1> and compatible remembered settings.
+Early requests can be replayed; retries are not automatic.
+
+See L<Unblock::HTTP3::Connection> for settings, shutdown, ORIGIN and extension
+controls. See L<Unblock::HTTP3::Transaction> for request-stream state.
 
 =head1 SEE ALSO
 
-L<Unblock::HTTP3>, L<Unblock::HTTP3::Transaction>,
-L<Uniform::HTTP::Request>
+L<Unblock::HTTP3::Integration>, L<Unblock::HTTP3::Server>,
+L<Unblock::HTTP3::Transaction>, L<Uniform::HTTP::Request>,
+L<Net::QUIC::Driver>
 
 =head1 LICENSE
 
