@@ -2030,15 +2030,11 @@ my $callback_response_body = '';
 my $callback_complete_count = 0;
 my $callback_error_count = 0;
 
-my $callback_request = Uniform::HTTP::Request->new(
+my $callback_client_tx = $client_h3->request(
     method    => 'GET',
     target    => '/callback-api',
     scheme    => 'https',
     authority => 'localhost',
-);
-
-my $callback_client_tx = $client_h3->request(
-    $callback_request,
     on_informational => sub {
         my ($transaction, $response) = @_;
         push @callback_informational, $response->status;
@@ -2087,19 +2083,13 @@ ok(
     'server on_request_end runs without changing buffered receive mode',
 );
 
-$callback_server_tx->send_informational(
-    Uniform::HTTP::Response->new(
-        status => 103,
-    ),
-);
+$callback_server_tx->send_informational(status => 103);
 
 $callback_server_tx->respond(
-    Uniform::HTTP::Response->new(
-        status => 200,
-        headers => [
-            [ 'content-type', 'text/plain' ],
-        ],
-    ),
+    status => 200,
+    headers => [
+        [ 'content-type', 'text/plain' ],
+    ],
     stream_body => 1,
 );
 
