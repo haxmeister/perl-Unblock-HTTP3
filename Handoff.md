@@ -133,3 +133,11 @@ but continues reset/close processing and normal terminal cleanup.
 Updated t/04 overflow expectations for the agreed stream-local failure scope.
 Changed new t/24 object identity checks to refaddr, avoiding Test2 deep
 comparison recursion through the connection graph. Awaiting new CI run.
+
+The replacement full run 39058891647 confirmed cancellation reset bookkeeping
+is fixed, but exposed receive credit returned twice after STOP_SENDING.
+Net::QUIC discards and credits delivered/unconsumed bytes when stop_sending
+runs. Terminal Reader cleanup and rejected queued native events now skip
+credit already returned there. No Net::QUIC changes were made.
+The overflow test now clears prior deliberate error state before waiting.
+Interop run 39058891709 passed. Awaiting the next full test run.

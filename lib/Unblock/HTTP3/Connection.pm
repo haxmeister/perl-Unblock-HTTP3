@@ -2415,6 +2415,11 @@ sub _consume_received_body {
     my $stream = $self->{streams}{ $transaction->stream_id }
         or croak 'received body stream is no longer available';
 
+    # STOP_SENDING already discards and credits delivered, unconsumed bytes
+    # in Net::QUIC. Terminal Reader cleanup must not credit them a second time.
+    return if $transaction->is_terminal
+        && defined($stream->local_stop_sending_code);
+
     $stream->consume(0 + $amount);
     return;
 }
@@ -3751,11 +3756,13 @@ sub _drain_events {
             if ($type eq 'data') {
                 my $stream = $self->{streams}{$id};
                 $stream->consume(length($args[0]))
-                    if defined($stream) && length($args[0]);
+                    if defined($stream) && length($args[0])
+                        && !defined($stream->local_stop_sending_code);
             } elsif ($type eq 'deferred_consume') {
                 my $stream = $self->{streams}{$id};
                 $stream->consume($args[0])
-                    if defined($stream) && $args[0];
+                    if defined($stream) && $args[0]
+                        && !defined($stream->local_stop_sending_code);
             }
             next;
         }
@@ -3838,7 +3845,8 @@ sub _drain_events {
         if ($type eq 'deferred_consume') {
             my $stream = $self->{streams}{$id};
             $stream->consume($args[0])
-                if defined($stream) && $args[0];
+                if defined($stream) && $args[0]
+                        && !defined($stream->local_stop_sending_code);
             next;
         }
 

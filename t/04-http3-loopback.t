@@ -2144,6 +2144,9 @@ my $oversized_request = Uniform::HTTP::Request->new(
     body      => 'z' x 2048,
 );
 
+# Earlier cases deliberately trigger unrelated stream errors.
+undef $server_error_transaction;
+undef $server_error_callback_code;
 my $oversized_tx = $client_h3->request($oversized_request);
 isa_ok($oversized_tx, ['Unblock::HTTP3::Transaction']);
 
