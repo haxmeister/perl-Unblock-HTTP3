@@ -40,7 +40,26 @@ per-origin caps; CI for the H3 feature and upper pinned integration.
 Update the upper CI pin only to a verified H3 feature source SHA.
 No release, version bump, merge, or changes to main.
 
-This is an implementation plan until verified CI results are recorded.
+Implemented in Connection.pm with an optional constructor callback
+on_request_available($h3_client). Failed open_bidi_stream sets a pending
+credit flag before HTTP/3 submits or freezes the request. The engine
+remains the sole owner of the QUIC on_stream_available handler, and
+invokes the optional callback once after a later 'bidi' event and
+internal service. 'uni' events do not wake request writers. GOAWAY,
+shutdown, and failed connection states suppress notifications.
+No automatic retry or QUIC credit count is fabricated.
+
+New t/26-request-capacity.t checks unsent request mutability, one-shot
+wakeup, re-arming after another refusal, event-type filtering, and
+shutdown/GOAWAY guards. MANIFEST and Client POD updated. No changes
+to Net::QUIC or Uniform::HTTP.
+
+Verified feature source: 9bfd9314fb66f19860a96a20ec6eb082e86e3ce5
+HTTP3 full matrix run 39069441321 PASS on Perl 5.20/5.28/5.36/5.44.
+Perl 5.44 source tests: 27 files / 959 checks, plus 27 files /
+987 checks for disttest. Interop run 39069441276 PASS.
+No version bump, release, merge, or main edit. The upper workflow
+must pin this feature source for coordinated integration CI.
 
 ## Implemented
 
