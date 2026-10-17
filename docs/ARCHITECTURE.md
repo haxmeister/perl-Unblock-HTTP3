@@ -497,8 +497,11 @@ The default queued streaming receive-body limit is 4 MiB.
 These limits are configurable.
 
 The field-section limit is advertised in HTTP/3 SETTINGS and is also enforced
-locally. Resource-limit violations close the HTTP/3 connection with
-H3_EXCESSIVE_LOAD.
+locally. Field-section limit violations close the HTTP/3 connection with
+H3_EXCESSIVE_LOAD. Buffered or queued streaming body-limit violations reset
+only the affected request stream with H3_EXCESSIVE_LOAD. Other streams remain
+usable, retained body bytes are released, and discarded receive credit is
+returned. Transaction on_finish runs after its error callback.
 
 Unblock::HTTP3 also records the peer's SETTINGS_MAX_FIELD_SECTION_SIZE and checks
 every outgoing header and trailer section before submission. An oversized

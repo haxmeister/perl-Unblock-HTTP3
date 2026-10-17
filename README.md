@@ -1,5 +1,9 @@
 # Unblock::HTTP3
 
+Development branch: `feature/unified-receive-lifecycle` adds bounded receive
+buffers and transaction `on_data` / `on_finish` callbacks. These changes are
+not released. See `Handoff.md` for validation and continuation instructions.
+
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP3.svg)](https://metacpan.org/dist/Unblock-HTTP3)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP3.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP3)
 [![CI](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml)

@@ -27,7 +27,7 @@ sub request {
         my %field = @arg;
         for my $name (qw(
             stream_body receive_body datagrams early_data
-            on_informational on_response on_body on_complete on_error on_drain
+            on_informational on_response on_body on_data on_finish on_complete on_error on_drain
         )) {
             $option{$name} = delete $field{$name} if exists $field{$name};
         }
@@ -86,6 +86,23 @@ or run an event loop. Use L<Unblock::HTTP3::Integration> to connect an event
 framework through Net::QUIC::Driver.
 
 HTTP/3 response messages are canonical Uniform::HTTP::Response objects.
+
+=head1 RECEIVE BODY OPTIONS
+
+C<receive_body> accepts C<buffered> or C<stream>. Buffering remains the default.
+C<max_buffered_body_bytes> is a positive byte limit, defaulting to 64 MiB.
+Zero does not mean unlimited. Buffered reception installs the body on the
+same Uniform message before freezing it and invoking the body-completion
+callback. Empty completed bodies have an empty string representation.
+The engine releases retained chunks on failure or cancellation.
+
+Select streaming per transaction with C<$tx-E<gt>on_data(...)> during the
+header callback. Legacy C<on_body> still selects streaming automatically.
+Do not combine C<on_data> and C<on_body>. See
+L<Unblock::HTTP3::Transaction/RECEIVE AND FINISH CALLBACKS>.
+
+A buffer limit failure resets only the affected stream.
+It does not call successful body completion.
 
 =head1 CONSTRUCTOR
 

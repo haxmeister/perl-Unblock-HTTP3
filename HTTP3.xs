@@ -527,7 +527,7 @@ unblock_http3_received_uniform_flags(
     }
 
     if (fin) {
-        flags |= UHTTP_COMPLETE;
+        flags |= UHTTP_COMPLETE | UHTTP_HAS_BUFFERED_BODY;
     } else {
         flags |=
             UHTTP_MUTABLE
@@ -572,6 +572,10 @@ unblock_http3_header_block_uniform_request(
         UHTTP_KIND_REQUEST,
         fin
     );
+    if (fin) {
+        input.body.data = "";
+        input.body.len = 0;
+    }
     input.version.data = "3";
     input.version.len = 1;
     input.method =
@@ -632,6 +636,10 @@ unblock_http3_header_block_uniform_response(
         UHTTP_KIND_RESPONSE,
         fin
     );
+    if (fin) {
+        input.body.data = "";
+        input.body.len = 0;
+    }
     input.version.data = "3";
     input.version.len = 1;
     input.status = status;

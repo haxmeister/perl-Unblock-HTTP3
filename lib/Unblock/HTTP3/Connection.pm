@@ -1050,7 +1050,7 @@ sub _new {
             unless defined($limit->[1])
                 && !ref($limit->[1])
                 && $limit->[1] =~ /\A[0-9]+\z/
-                && $limit->[1] > 0;
+                && $limit->[1] > 0 && $limit->[1] <= (~0);
     }
 
     for my $setting (
@@ -1516,12 +1516,15 @@ sub _fail_connection {
     $self->{error_code} = 0 + $code;
     $self->{error} = "$message";
 
+    my $callback_error = '';
     for my $transaction (values %{ $self->{transactions} }) {
         next if $transaction->is_terminal;
-        $transaction->_mark_error($message, $code);
+        eval { $transaction->_mark_error($message, $code); 1 }
+            or $callback_error ||= "$@";
     }
 
     $self->{quic}->close($code);
+    die $callback_error if length $callback_error;
     return;
 }
 
@@ -1537,7 +1540,7 @@ sub request {
 
     my %callbacks;
     for my $name (qw(
-        on_informational on_response on_body on_complete on_error on_drain
+        on_informational on_response on_body on_data on_finish on_complete on_error on_drain
     )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
@@ -1667,6 +1670,10 @@ sub request {
             unless $self->{peer_settings_initialized};
     }
 
+    croak 'request(): on_data cannot be combined with on_body or receive_body on_data'
+        if $callbacks{on_data} && ($callbacks{on_body} || $receive_options->{on_data});
+    my $on_data = delete $callbacks{on_data};
+
     my $stream_id = $self->_submit_request(
         $request,
         $request_streaming,
@@ -1710,6 +1717,7 @@ sub request {
         $receive_options,
     );
 
+    $transaction->on_data($on_data) if $on_data;
     $self->{transactions}{$stream_id} = $transaction;
 
     if ($stream_body && defined $callbacks{on_drain}) {
@@ -2422,24 +2430,11 @@ sub _cancel_transaction {
 
     return $transaction if $transaction->is_terminal;
 
-    my $id = $transaction->stream_id;
-    my $stream = $self->{streams}{$id};
-
-    if (defined $stream) {
-        if ($stream->can_receive && !$stream->remote_finished) {
-            $self->{native}->shutdown_stream_read($id);
-            $stream->stop_sending($H3_REQUEST_CANCELLED);
-            $transaction->_mark_local_stop_sending($H3_REQUEST_CANCELLED);
-        }
-
-        if ($stream->can_send && !defined($stream->local_reset_code)) {
-            $self->{native}->shutdown_stream_write($id);
-            $stream->reset($H3_REQUEST_CANCELLED);
-            $transaction->_mark_local_reset($H3_REQUEST_CANCELLED);
-        }
-    }
-
-    $self->{native}->discard_body($id);
+    $self->_reject_message_stream(
+        $transaction->stream_id,
+        'HTTP/3 transaction cancelled',
+        $H3_REQUEST_CANCELLED,
+    );
 
     $transaction->_mark_cancelled;
     return $transaction;
@@ -2759,8 +2754,18 @@ sub _capsule_protocol_error {
     return;
 }
 
+sub _receive_body_failure {
+    my ($self, $transaction, $reason, $discarded_bytes) = @_;
+    my $stream = $self->{streams}{ $transaction->stream_id };
+    $stream->consume($discarded_bytes) if $stream && $discarded_bytes;
+    $self->_reject_message_stream($transaction->stream_id, $reason, $H3_EXCESSIVE_LOAD);
+    $transaction->_mark_error($reason, $H3_EXCESSIVE_LOAD);
+    return;
+}
+
 sub _reject_message_stream {
-    my ($self, $id, $reason) = @_;
+    my ($self, $id, $reason, $code) = @_;
+    $code = $H3_MESSAGE_ERROR unless defined $code;
 
     $self->{rejected_streams}{$id} = "$reason";
 
@@ -2770,15 +2775,15 @@ sub _reject_message_stream {
     if (defined $stream) {
         if ($stream->can_receive && !$stream->remote_finished) {
             $self->{native}->shutdown_stream_read($id);
-            $stream->stop_sending($H3_MESSAGE_ERROR);
-            $transaction->_mark_local_stop_sending($H3_MESSAGE_ERROR)
+            $stream->stop_sending($code);
+            $transaction->_mark_local_stop_sending($code)
                 if defined $transaction;
         }
 
         if ($stream->can_send && !defined($stream->local_reset_code)) {
             $self->{native}->shutdown_stream_write($id);
-            $stream->reset($H3_MESSAGE_ERROR);
-            $transaction->_mark_local_reset($H3_MESSAGE_ERROR)
+            $stream->reset($code);
+            $transaction->_mark_local_reset($code)
                 if defined $transaction;
         }
     }
@@ -2841,7 +2846,7 @@ sub _maybe_complete_transaction {
 
     my $transaction = $self->{transactions}{$id};
     return unless defined $transaction;
-    return if $transaction->is_terminal;
+    return if $transaction->is_terminal || $transaction->{callback_depth};
 
     if ($self->{role} eq 'client') {
         my $response = $transaction->response;
@@ -2863,6 +2868,7 @@ sub _maybe_complete_transaction {
 
     my $request = $transaction->request;
     return unless $request->is_complete;
+    return unless $transaction->{request_end_callback_called};
 
     my $reader = $transaction->_incoming_body_reader('request');
     return if defined($reader) && !$reader->is_complete;
@@ -3800,6 +3806,12 @@ sub _drain_events {
 
             my $transaction = $self->{transactions}{$id}
                 or croak "received HTTP/3 DATA for unknown Transaction";
+            if ($transaction->is_terminal) {
+                my $stream = $self->{streams}{$id};
+                $stream->consume(length($bytes)) if $stream && length($bytes);
+                next;
+            }
+            $transaction->{receive_started} = 1;
             my $kind = $self->{role} eq 'server'
                 ? 'request'
                 : 'response';
@@ -3810,10 +3822,8 @@ sub _drain_events {
                     $reader->pending_bytes + length($bytes)
                     > $self->{max_streaming_body_bytes}
                 ) {
-                    $self->_fail_connection(
-                        $H3_EXCESSIVE_LOAD,
-                        'HTTP/3 streaming body queue exceeds configured limit',
-                    );
+                    $self->_receive_body_failure($transaction,
+                        'HTTP/3 streaming body queue exceeds configured limit', length($bytes));
                     next;
                 }
 
@@ -3827,10 +3837,8 @@ sub _drain_events {
                 $current + length($bytes)
                 > $self->{max_buffered_body_bytes}
             ) {
-                $self->_fail_connection(
-                    $H3_EXCESSIVE_LOAD,
-                    'HTTP/3 buffered body exceeds configured limit',
-                );
+                $self->_receive_body_failure($transaction,
+                    'HTTP/3 buffered body exceeds configured limit', length($bytes));
                 next;
             }
 
@@ -3852,21 +3860,20 @@ sub _drain_events {
 
         if ($type eq 'end_stream') {
             my $transaction = $self->{transactions}{$id};
-            if (defined $transaction) {
+            if (defined $transaction && !$transaction->is_terminal) {
                 my $kind = $self->{role} eq 'server'
                     ? 'request'
                     : 'response';
                 my $reader = $transaction->_incoming_body_reader($kind);
 
                 if (defined $reader) {
-                    $reader->_mark_end;
-
                     my $message = $self->{messages}{$id};
                     if (defined $message) {
                         $message->freeze_trailers;
                         $message->freeze;
                         $message->mark_complete;
                     }
+                    $reader->_mark_end;
                 } else {
                     $transaction->_finish_received_message($kind);
                 }
@@ -4193,6 +4200,7 @@ sub _finish_headers {
             $message,
         );
         die $response_result unless $response_result eq '1';
+        return if $transaction->is_terminal;
 
         $transaction->_ensure_receive_reader('response');
 

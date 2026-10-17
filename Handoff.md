@@ -1,3 +1,68 @@
+# Receive body and lifecycle implementation checkpoint
+
+Updated: 2026-10-17
+Repository: haxmeister/perl-Unblock-HTTP3
+Branch: feature/unified-receive-lifecycle
+Status: implementation checkpoint, not release ready.
+
+The maintainer explicitly authorized changes to HTTP1, HTTP2, HTTP3 and
+perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed publication of these
+feature branches and coordinated CI on 2026-10-17. Publication is authorized.
+The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
+
+## Implemented
+
+- Bounded buffered reception and per-transaction on_data streaming selection.
+- Client request options on_data and on_finish; server registration at headers.
+- Exactly-once terminal notification after completion/error callbacks; terminal
+  observer exceptions are ignored. Cancellation is distinct from an error.
+- The same native engine transaction and Uniform message are retained.
+- Buffered data is installed before completion/freeze; failed buffers are freed.
+- Bodyless messages already frozen at headers carry an empty body string at
+  construction. Public native ABI layouts/discovery paths are unchanged.
+- Default receive modes remain H1/H2 stream, H3 buffered; buffer cap is 64 MiB.
+
+H3 reuses Body::Reader and existing owned receive chunks. Overflow now resets
+only its stream. Streamed messages are frozen before on_request_end.
+
+## Validation
+
+Three local test files pass: t/01-native.t, t/15-receive-body-ownership.t,
+and t/25-terminal-callbacks.t (92 top-level tests/subtests). XS was built using
+upstream nghttp3 d29ceea176cebc1f41c9d818c3b1825143d3f813 (1.18.90 development).
+Test-Simple and Term-Table were loaded from read-only source checkouts.
+Net::QUIC is still unavailable, so full H3/live QUIC tests have NOT run locally.
+New live regression source: t/24-receive-lifecycle.t. Run the full existing
+test.yml workflow using released dependencies before calling H3 verified.
+
+Local reproduction (from this repo):
+  LD_LIBRARY_PATH=../deps/nghttp3
+  PERL5LIB=../deps/Uniform-HTTP/lib:../deps/Test-Simple/lib:../deps/Term-Table/lib
+  prove -bl t/01-native.t t/15-receive-body-ownership.t t/25-terminal-callbacks.t
+
+The scratch /tmp/http3-source-Makefile.PL supplies upstream native build flags;
+the repository Makefile.PL is unchanged. Body::Reader cancellation now returns
+queued receive credit. Reader completion defers terminal notification until
+both request-end and Reader on_end callbacks have unwound.
+
+No performance or zero-copy improvement is claimed. Version numbers are
+unchanged; this is a coordinated development branch, not a CPAN release.
+
+## Resume
+
+1. Check git status/branch and inspect the diff; main must remain unchanged.
+2. Local source/POD review and focused tests are complete; inspect the recorded
+   validation limits before continuing with CI.
+3. Publish these authorized dependency feature branches and verify remote trees.
+4. Run full GitHub CI, fix failures, and record exact commit/run IDs here.
+5. Update upper-layer CI pins to the published engine commits and run live
+   Unblock::HTTP integration. Upper Server now maps on_headers to engine
+   on_request and application on_request to engine on_request_end.
+6. Preserve frequent handoff updates. WebSocket, transaction_class, pause/resume,
+   and client pooling are later milestones; no changes to Net::QUIC authorized.
+
+## Historical handoff (superseded)
+
 # Unblock::HTTP3 handoff
 
 ## Current state
