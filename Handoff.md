@@ -3,7 +3,7 @@
 Updated: 2026-10-17
 Repository: haxmeister/perl-Unblock-HTTP3
 Branch: feature/unified-receive-lifecycle
-Status: feature published; correcting full CI failures, not release ready.
+Status: receive/lifecycle implementation passes full CI; not a release candidate.
 
 The maintainer explicitly authorized changes to HTTP1, HTTP2, HTTP3 and
 perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed publication of these
@@ -53,13 +53,35 @@ unchanged; this is a coordinated development branch, not a CPAN release.
 1. Check git status/branch and inspect the diff; main must remain unchanged.
 2. Local source/POD review and focused tests are complete; inspect the recorded
    validation limits before continuing with CI.
-3. Publish these authorized dependency feature branches and verify remote trees.
-4. Run full GitHub CI, fix failures, and record exact commit/run IDs here.
+3. Feature branch is published, tree verified and full CI passed (see below).
+4. Coordinate remaining unified verification using the upper handoff.
 5. Update upper-layer CI pins to the published engine commits and run live
    Unblock::HTTP integration. Upper Server now maps on_headers to engine
    on_request and application on_request to engine on_request_end.
 6. Preserve frequent handoff updates. WebSocket, transaction_class, pause/resume,
    and client pooling are later milestones; no changes to Net::QUIC authorized.
+
+## Verified feature publication
+
+Tested source: 3824e7b91012f2a73143ca46eb0d077db6d1af6a
+Full suite: https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/39059118633
+PASS on Perl 5.20, 5.28, 5.36 and 5.44: 26 files / 942 top-level tests/subtests.
+Perl 5.44 also passed distcheck, disttest, staged NativeABI/header installation
+and POD syntax. Dependencies were the released Net::QUIC 0.04,
+Alien::nghttp3 0.01 and Uniform::HTTP 0.06.
+Interop: https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/39059118732
+PASS for independent quic-go client and public HTTP/3 servers.
+
+CI exposed and fixed cancellation reset bookkeeping: rejected payload is
+discarded while QUIC reset/close processing and normal cleanup continue.
+STOP_SENDING already returns credit for delivered/unconsumed bytes in Net::QUIC;
+terminal Reader cleanup and rejected native events must not credit them twice.
+The live tests now use refaddr for identity and stream-local overflow assertions.
+No Net::QUIC changes were needed. The dependency checkout is read-only.
+
+Upper integration run 39059172525 pins this tested commit and is in progress.
+The upper handoff records its final result. Main remains unchanged.
+Subsequent handoff-only commits do not require changing the tested source pin.
 
 ## Historical handoff (superseded)
 
