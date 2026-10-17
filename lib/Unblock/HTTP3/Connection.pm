@@ -967,6 +967,7 @@ sub _new {
         )
         : undef;
     my $on_extension_settings = delete $args{on_extension_settings};
+    my $on_request_available = delete $args{on_request_available};
     my %callbacks;
     for my $name (qw(on_request on_body on_request_end on_error)) {
         next unless exists $args{$name};
@@ -992,6 +993,11 @@ sub _new {
     croak 'on_extension_settings must be a code reference'
         if defined($on_extension_settings)
             && ref($on_extension_settings) ne 'CODE';
+    croak 'on_request_available must be a code reference'
+        if defined($on_request_available)
+            && ref($on_request_available) ne 'CODE';
+    croak 'on_request_available is only valid for a client connection'
+        if $role ne 'client' && defined($on_request_available);
 
     croak 'enable_extended_connect must be 0 or 1'
         if !defined($enable_extended_connect)
@@ -1172,6 +1178,8 @@ sub _new {
         peer_settings_initialized  => defined($remembered_peer_settings) ? 1 : 0,
         peer_settings_parser       => {},
         on_extension_settings      => $on_extension_settings,
+        on_request_available       => $on_request_available,
+        request_credit_blocked     => 0,
         callbacks                  => \%callbacks,
         control_settings_rewritten => 0,
         control_settings_delta     => 0,
@@ -3030,7 +3038,9 @@ sub start {
 
     $self->{quic}->on_stream_available(sub {
         return unless defined $weak;
+        my ($quic, $kind) = @_;
         $weak->_service;
+        $weak->_request_stream_available($kind);
     });
 
     if ($self->{quic}->can_receive_datagram) {
@@ -3044,6 +3054,25 @@ sub start {
     $self->_service;
 
     return $self;
+}
+
+sub _request_stream_available {
+    my ($self, $kind) = @_;
+    return unless $self->{role} eq 'client'
+        && $self->{request_credit_blocked}
+        && defined($kind) && $kind eq 'bidi'
+        && !$self->{failed}
+        && !defined($self->{remote_shutdown_id})
+        && !$self->{shutdown_started};
+
+    # This is a one-shot wakeup, not a claim that any stream slot remains.
+    # Consumers must try request() again and wait for another notification
+    # if another user of this QUIC connection has consumed the credit.
+    $self->{request_credit_blocked} = 0;
+    my $callback = $self->{on_request_available} or return;
+    my $ok = eval { $callback->($self); 1 };
+    warn "on_request_available callback failed: $@" unless $ok;
+    return;
 }
 
 sub _reset_peer_settings_to_defaults {
@@ -4397,7 +4426,13 @@ sub _submit_request {
     }
 
     my $stream = $self->{quic}->open_bidi_stream;
-    return unless defined $stream;
+    if (!defined $stream) {
+        # No local bidirectional QUIC stream was opened, so no HTTP request
+        # has been submitted. Notify the caller when credit may return.
+        $self->{request_credit_blocked} = 1;
+        return;
+    }
+    $self->{request_credit_blocked} = 0;
 
     my $id = $stream->id;
     $self->{streams}{$id} = $stream;
