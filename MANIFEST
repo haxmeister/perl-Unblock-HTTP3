@@ -55,3 +55,4 @@ t/22-named-arguments.t
 t/23-pause-indexing.t
 t/24-receive-lifecycle.t
 t/25-terminal-callbacks.t
+t/26-request-capacity.t
