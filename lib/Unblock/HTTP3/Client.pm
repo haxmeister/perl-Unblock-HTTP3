@@ -114,6 +114,14 @@ It does not call successful body completion.
 
 C<quic> is required and must be a L<Net::QUIC::Connection>.
 
+An optional C<on_request_available =E<gt> sub { ... }> callback receives
+this same Client after a prior C<request()> returned undef because QUIC
+could not open a bidirectional stream, and a later QUIC C<bidi> availability
+event occurs. The callback is a one-shot hint, not reserved stream credit;
+try the unsubmitted request again from a later event-loop turn. No
+notification occurs for unidirectional stream events or normal traffic.
+This callback is not an automatic retry mechanism.
+
 Useful optional constructor settings include C<receive_body>,
 C<send_buffer_limit>, C<max_field_section_size>,
 C<max_buffered_body_bytes>, C<max_streaming_body_bytes>,
@@ -135,7 +143,11 @@ operation call C<start()> only after C<$quic-E<gt>ready> is true.
         on_response => sub { ... },
     );
 
-Returns an L<Unblock::HTTP3::Transaction>. Request fields are used to
+Returns an L<Unblock::HTTP3::Transaction> when a request stream is
+admitted, or undef if QUIC has no local bidirectional stream credit.
+No request is submitted or frozen in the latter case, and an optional
+C<on_request_available> callback can signal when trying again may work.
+Request fields are used to
 construct a canonical Uniform::HTTP::Request. The existing object form is
 also accepted:
 
