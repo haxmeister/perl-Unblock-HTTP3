@@ -3,7 +3,7 @@
 Updated: 2026-10-17
 Repository: haxmeister/perl-Unblock-HTTP3
 Branch: feature/unified-receive-lifecycle
-Status: implementation checkpoint, not release ready.
+Status: feature published; correcting full CI failures, not release ready.
 
 The maintainer explicitly authorized changes to HTTP1, HTTP2, HTTP3 and
 perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed publication of these
@@ -123,3 +123,13 @@ Last completed work: PAUSE metadata fix and successful 0.12 release audit
 - HTTP/3 owns QUIC stream callbacks after start; do not overwrite them.
 - Keep Uniform::HTTP pure Perl; preserve optional native fast paths in engines.
 - Handoff.md is repository-only, never part of CPAN distribution.
+
+## 2026-10-17 CI correction checkpoint
+
+Published initial engine commit d486f682530b436f4dc00f532f80cac669236db6.
+Full test run 39058707266 exposed rejected-stream bookkeeping skipping the
+peer reset code after cancellation; service now discards rejected payload
+but continues reset/close processing and normal terminal cleanup.
+Updated t/04 overflow expectations for the agreed stream-local failure scope.
+Changed new t/24 object identity checks to refaddr, avoiding Test2 deep
+comparison recursion through the connection graph. Awaiting new CI run.

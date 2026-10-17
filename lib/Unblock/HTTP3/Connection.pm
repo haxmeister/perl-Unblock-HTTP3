@@ -3572,35 +3572,19 @@ sub _service_stream {
         return if $self->{failed};
     }
 
-    if ($self->{rejected_streams}{$id}) {
-        if ($stream->can_receive) {
-            while (my $chunk = $stream->next_data_chunk) {
-                my ($bytes) = @$chunk;
-                $stream->consume(length($bytes))
-                    if length($bytes);
-            }
-        }
-
-        if ($stream->closed) {
-            $self->_release_peer_bidi_stream_credit(
-                $id,
-                $stream,
-            );
-            $self->{native}->discard_body($id);
-            delete $self->{streams}{$id};
-            delete $self->{stream_lifecycle}{$id};
-                    delete $self->{rejected_streams}{$id};
-        }
-
-        return;
-    }
-
     if ($stream->can_receive) {
         while (1) {
             my $chunk = $stream->next_data_chunk;
             last unless defined $chunk;
 
             my ($bytes, $fin) = @$chunk;
+
+            # Rejected streams still need QUIC reset/close bookkeeping below.
+            # Discard payload without allowing queued HTTP callbacks to escape.
+            if ($self->{rejected_streams}{$id}) {
+                $stream->consume(length($bytes)) if length($bytes);
+                next;
+            }
 
             $self->_inspect_peer_settings_bytes($id, $bytes);
             return if $self->{failed};
@@ -3629,7 +3613,7 @@ sub _service_stream {
         }
     }
 
-    if ($stream->can_send) {
+    if ($stream->can_send && !$self->{rejected_streams}{$id}) {
         my $acked_offset = $stream->acked_offset;
 
         if (

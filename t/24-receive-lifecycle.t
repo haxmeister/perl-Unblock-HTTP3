@@ -199,13 +199,13 @@ my $server_h3 = Unblock::HTTP3::Server->new(
         $requests{$path} = $request;
         push @{$events{$path}}, 'headers';
         $tx->on_finish(sub {
-            is($_[0], $tx, 'same terminal transaction');
+            is(refaddr($_[0]), refaddr($tx), 'same terminal transaction');
             push @{$events{$path}}, 'finish:' . $_[0]->state;
             $_[0]->cancel;
         });
         if ($path eq '/stream' || $path eq '/cancel-data') {
             $tx->on_data(sub {
-                is($_[0], $tx, 'same streaming transaction');
+                is(refaddr($_[0]), refaddr($tx), 'same streaming transaction');
                 $data{$path} .= $_[1];
                 is($tx->_buffered_body_bytes('request'), 0, 'stream does not accumulate');
                 if ($path eq '/cancel-data') {

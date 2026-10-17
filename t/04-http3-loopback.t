@@ -193,6 +193,7 @@ my $server_request_callback_count = 0;
 my $server_request_end_callback_count = 0;
 my $server_error_callback_count = 0;
 my $server_error_callback_code;
+my $server_error_transaction;
 my $server_callback_last_transaction;
 my $client_extension_stream;
 my $client_extension_stream_data = '';
@@ -259,6 +260,7 @@ my $server_h3 = Unblock::HTTP3::Server->new(
         my ($transaction, $error, $error_code) = @_;
         ++$server_error_callback_count;
         $server_error_callback_code = $error_code;
+        $server_error_transaction = $transaction;
         return;
     },
     extension_settings      => {
@@ -2147,19 +2149,19 @@ isa_ok($oversized_tx, ['Unblock::HTTP3::Transaction']);
 
 ok(
     run_until(sub {
-        return $server_h3->failed;
+        return $server_error_transaction && $server_error_transaction->is_error;
     }),
     'server rejects a body larger than its configured buffer limit',
 );
 
 is(
-    $server_h3->error_code,
+    $server_error_transaction->local_reset_code,
     0x0107,
-    'body limit closes HTTP/3 with H3_EXCESSIVE_LOAD',
+    'body limit rejects its stream with H3_EXCESSIVE_LOAD',
 );
 
 like(
-    $server_h3->error,
+    $server_error_transaction->error,
     qr/buffered body exceeds configured limit/,
     'body limit records a useful HTTP/3 error',
 );
@@ -2172,6 +2174,8 @@ is(
     0x0107,
     'server on_error receives the HTTP/3 error code',
 );
+
+ok(!$server_h3->failed, 'body limit preserves the HTTP/3 connection');
 
 close $client_socket;
 close $server_socket;
