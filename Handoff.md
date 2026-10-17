@@ -79,8 +79,9 @@ terminal Reader cleanup and rejected native events must not credit them twice.
 The live tests now use refaddr for identity and stream-local overflow assertions.
 No Net::QUIC changes were needed. The dependency checkout is read-only.
 
-Upper integration run 39059172525 pins this tested commit and is in progress.
-The upper handoff records its final result. Main remains unchanged.
+Upper integration run 39059172525 pins this tested commit and PASSED:
+182 distribution checks and 15 live H1/H2 TCP and H3 QUIC/TLS checks.
+The coordinated ordinary Server milestone is verified. Main remains unchanged.
 Subsequent handoff-only commits do not require changing the tested source pin.
 
 ## Historical handoff (superseded)
