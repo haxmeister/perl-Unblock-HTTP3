@@ -1,6 +1,7 @@
 use strict;
 use warnings;
 use Test2::V0;
+use Scalar::Util qw(refaddr);
 
 use Unblock::HTTP3::Client;
 use Uniform::HTTP::Request;
@@ -40,8 +41,7 @@ ok(!defined $client->_submit_request($request, 0),
     'QUIC bidi credit exhaustion rejects submission before wire output');
 is($quic->{openings}, 1, 'only one QUIC open was attempted');
 ok($client->{request_credit_blocked}, 'engine remembers unsent admission failure');
-is($request->is_complete ? 1 : 0, 0,
-    'request remains untransmitted and unfrozen');
+ok($request->is_mutable, 'unsent request remains mutable');
 
 $client->_request_stream_available('uni');
 is(scalar @woken, 0, 'unidirectional stream availability does not admit requests');
@@ -49,7 +49,7 @@ ok($client->{request_credit_blocked}, 'uni event does not clear bidi block');
 
 $client->_request_stream_available('bidi');
 is(scalar @woken, 1, 'one notification when bidi credit might have returned');
-is($woken[0], $client, 'callback receives real HTTP3 Client');
+is(refaddr($woken[0]), refaddr($client), 'callback receives real HTTP3 Client');
 ok(!$client->{request_credit_blocked}, 'wake clears outstanding block flag');
 $client->_request_stream_available('bidi');
 is(scalar @woken, 1, 'event is one-shot until another refusal');
