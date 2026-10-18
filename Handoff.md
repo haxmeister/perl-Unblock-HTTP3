@@ -1,3 +1,34 @@
+## Resumed 12-producer HTTP3 stress: aggregate QUIC credit gap (2026-10-18)
+
+Do NOT treat HTTP3 0.13 as finished solely on the passing six-producer
+release audit. Upper feature extended original real-QUIC pressure fixture
+to 12 concurrent 1-MiB producers with independent 32768-byte Reader
+windows, held for two seconds, plus a fast request and 8192-byte native
+advisory send buffer. All original digest, fairness, retained-body
+accounting and completion assertions remain intact.
+
+Upper run 39157872356 confirmed a controlled difference:
+- Wide QUIC aggregate connection_window=33554432: 12-producer case PASS.
+- Tight aggregate connection_window=458752: 12-producer case FAIL
+  with watchdog. Reader0 stops at 98184 bytes, other 11 Readers each
+  hold 32739, and QUIC send-retained=0 despite all 12 H3 streams
+  remaining output-blocked with native retained-body bytes ~49591.
+These received totals are nearly the original aggregate connection
+receive window; changing only connection-level credit avoids the stall.
+
+Probable missing wakeup after peer connection-wide MAX_DATA expansion:
+the generic Net::QUIC on_stream_activity path includes per-stream credit
+and ACK/capacity wakes but may not emit a targeted event when only
+connection-level send credit expands. This is a hypothesis pending a
+standalone Net::QUIC regression/fix, NOT a proven native C root cause.
+Net::QUIC 0.05 remains RELEASED and READ-ONLY. Its modification requires
+separate maintainer authorization; do not add HTTP-specific transport
+polling or wakeup broadcasts to this HTTP3 engine.
+
+Upper feature 142d2129 now adds a 16-stream wide-window check while
+keeping the failing tight-window 12-stream check in CI. Verify its result.
+HTTP3 main remains unchanged; do not merge, tag, or release while this
+high-concurrency case is unresolved.
 ## Follow-up release audit: strict dependency version test flaw (2026-10-18)
 
 The project paused before any merge or publication to re-examine unfinished
