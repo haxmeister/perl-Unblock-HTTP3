@@ -1,3 +1,54 @@
+## HTTP3 final weak-notification compaction verified against released Net::QUIC 0.05 (2026-10-18)
+
+HTTP3 feature commit 5e0d496bb52331670edc9850d6fa417d984d0e67
+contains the safe in-place weak-preserving compaction and extended t/27.
+Full standalone Linux Perl 5.20/5.28/5.36/5.44 matrix GitHub Actions
+39172069382 PASS (all four jobs). Independent quic-go client and
+external public HTTP3 server interop 39172069428 PASS.
+
+Primary upper haxmeister/perl-Unblock-HTTP feature 9da9a02f... pinned
+the exact H3 feature and tested it with **published CPAN Net::QUIC 0.05**.
+Complete upper Linux::Event integration 39172126688 PASS: 128 warmup +
+2048 measured requests, two isolated rounds, 16 concurrent requests,
+alternating 4096/16384-byte responses, exact status/body and callback
+validation, all 256-completion memory and registry checkpoints. Unified
+ready_transactions stayed at 2-3 queue slots at ALL eight checkpoints
+in BOTH rounds (not 2176). Direct ready_transactions stayed at 1-5.
+Unified live transactions 1-16, streams 7-22, informational queue zero,
+and QUIC TX-buffer 0-240 bytes. At start -> end of measured phase,
+unified private KiB R1 7356->7480, R2 7396->7436; direct R1
+6340->6416, R2 6292->6364. RSS/PSS nearly flat. Upper complete
+distribution suite, all real socket stress (including 12/16 producers
+with bounded aggregate credits and the ten-second Reader hold), and
+short benchmarking smokes pass. Separate optional standalone Net::QUIC
+feature diagnostic upper run 39172126759 PASS as well, but HTTP3 0.13
+DOES NOT depend on its unreleased fix.
+
+The upper Client's on_finish cycle was addressed in upper commit
+9f47d2b4ea8370f5c215261cbe9474bebaae2801 with a strong
+active-operation registry plus weak callback back-references. Unit
+tests t/22 prove unretained completed handles/transactions are reclaimed
+while caller-held operations retain the actual engine Transaction.
+This upper fix and THIS H3 queue fix are both required to reproduce
+the successful bounded-memory profile.
+
+Warning: the prior intermediate H3 commit 3f194e... FAILED its matrix
+39171819978 because Perl grep created STRONG references from weak
+queue entries. Do not revive that implementation; t/27 checks weakness
+of moved entries, FIFO, pull-only strong retention, and stale-slot bounds
+behind an older live weak head. This compaction occurs once per 64
+callback queue insertions (no per-byte overhead). Legitimate unconsumed
+pull-only notifications stay strongly owned by contract.
+
+NEXT: The upper branch is adding a matched 2048-request,
+three-round profile with checkpoints disabled to examine throughput and
+latency without instrumentation overhead; see upper
+docs/PERFORMANCE.md. Hosted CI is not a speed-regression gate.
+No copy/allocate event rate was measured; the static payload boundary
+audit is not an allocation counter. Net::QUIC 0.05 main, both HTTP
+engine siblings, and all main branches are unchanged. HTTP3 0.13
+is NOT merged/tagged/released.
+
 ## Compaction must preserve weak references (2026-10-18)
 
 The initial weak-tail pruning attempt 3f194ec51b19de73a986612763954c4184cb21d6
