@@ -40,7 +40,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-This feature branch requires:
+The unreleased 0.13 release candidate requires:
 
 ```text
 Perl            5.20+
@@ -49,8 +49,12 @@ Net::QUIC       0.05+
 Uniform::HTTP   0.06+
 ```
 
-Version 0.12 fixes NativeABI version metadata for PAUSE indexing. The public
-API and protocol implementation are unchanged.
+Version 0.13 prepares bounded buffered reception and per-transaction
+on_data/on_finish lifecycle callbacks for the unified Unblock::HTTP layer.
+It also uses Net::QUIC 0.05 for credit-aware bounded QUIC output and targeted
+shared-capacity wakeups. The HTTP3 native consumer ABI remains version 1.
+
+Version 0.12 fixed NativeABI version metadata for PAUSE indexing.
 
 Version 0.11 adds the same named-field Client request, Transaction response,
 and informational response forms as the HTTP1 and HTTP2 engines. Existing

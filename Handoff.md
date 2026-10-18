@@ -1,3 +1,26 @@
+## Net::QUIC 0.05 published dependency and HTTP3 0.13 release candidate (2026-10-18)
+
+Net::QUIC 0.05 has been released to GitHub/CPAN. HTTP3 uses the released
+standalone Net::QUIC interface, retaining its optional credit-limited
+send_some(..., limit_to_credit => 1) output bridge and generic targeted
+capacity-waiter wakeups. Net::QUIC source is NOT modified here.
+
+Release preparation is on feature/unified-receive-lifecycle ONLY. Replaced
+Net::QUIC 0.04 dependency/CI verification with 0.05, removed the temporary
+feature-commit source installer, and updated all four workflows to use CPAN.
+The architecture document now describes the 0.05 credit-aware boundary.
+HTTP3 distribution and all 15 Perl module versions are prepared as 0.13;
+PAUSE metadata assertions and distribution artifact names are aligned.
+Public NativeABI remains version 1; no unrelated public API changes.
+
+This is NOT released or merged. CI, disttest, POD, real-QUIC interoperability,
+Linux::Event smoke and upper six-producer published-dependency integration
+require fresh verification at this new feature head. Prior source-pinned
+CI is historical evidence only. Do not weaken the upper six-producer test.
+Main and other repositories are unchanged. Do not tag, merge or publish
+without explicit maintainer authorization. Update this handoff with actual
+run IDs, results and remaining blockers before release.
+
 # Receive body and lifecycle implementation checkpoint
 
 Updated: 2026-10-17

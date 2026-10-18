@@ -68,7 +68,7 @@ jobs:
           MAKE=$(perl -MConfig -e 'print $Config{make}')
           "$MAKE" dist
 
-          DIST="$PWD/Unblock-HTTP3-0.12.tar.gz"
+          DIST="$PWD/Unblock-HTTP3-0.13.tar.gz"
           test -f "$DIST"
 
           WORK="$RUNNER_TEMP/unblock-http3-nativeabi-dist"
@@ -78,7 +78,7 @@ jobs:
           mkdir -p "$WORK" "$INSTALL"
 
           tar -xzf "$DIST" -C "$WORK"
-          cd "$WORK/Unblock-HTTP3-0.12"
+          cd "$WORK/Unblock-HTTP3-0.13"
 
           perl Makefile.PL INSTALL_BASE="$INSTALL"
           "$MAKE"
