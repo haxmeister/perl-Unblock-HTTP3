@@ -45,17 +45,39 @@ Native source commit 21bf5aba9aed9d2b7cae0460718df9ec1421d258;
 per-stream producer scheduling f4fc802bd9fcee7fc80e14401aca49a231244bb1;
 t/01-native accounting regression 96cf41e9378333fb4f7b48d89c8311c1dcf7cee7.
 Run 39098219790 PASSED engine Perl version matrix at scheduler source.
-Full latest native CI 39098239956 (including new assertions) pending
-at this checkpoint; inspect run status before calling this source verified.
+Native source 96cf41e9378333fb4f7b48d89c8311c1dcf7cee7
+PASSED full engine Perl matrix CI 39098239956 (including new
+per-stream accounting assertions) and production source passed
+interop CI 39098219785. Later commits are docs only.
 
-The upper unified CI workflow pins latest native source
-96cf41e9378333fb4f7b48d89c8311c1dcf7cee7,
-and runs xt/linux-event-quic-multi-credit.t with the 8192 native
-soft budget and a second 4 MiB isolated receive-credit budget.
-Upper run 39098276763 is pending. If tiny-budget still starves,
-inspect actual ACK/per-stream counters and scheduling ordering;
-do not claim a completed fix. Do not change main, release, tag,
-merge, bump versions, or edit read-only dependencies.
+The upper workflow pins native source
+96cf41e9378333fb4f7b48d89c8311c1dcf7cee7
+and runs xt/linux-event-quic-multi-credit.t with 8192 and again
+with 4 MiB native send buffering. Upper 39098276763 proved
+the 8192 deadlock was resolved: all three 1 MiB streams finished
+with correct hashes, write(false)/on_drain accounting and staged
+Reader release. ONE test-only check incorrectly demanded that
+all three readers already have nonzero data queued under 8192;
+QUIC scheduling initially left Reader2 empty. This expectation
+was corrected: some Reader data must be held, each stream
+remains incomplete until deliberately drained, and the 4 MiB
+isolation case still requires pending bytes in all three.
+
+VERIFIED latest upper run 39098422769 PASS at test source
+a545a4ddecef5501e3392dcd3f4f3a4a56223efd:
+552 distribution checks, 453 real TCP/QUIC checks at 8192,
+plus 56 checks PASS at 4 MiB. Three streams each delivered
+all 1 MiB with correct digests and no unwarranted replay;
+the fast response completed before slow Readers were released.
+Producer false/resume counts matched. Sampled QUIC retained-send
+peak was 8192 bytes in this specific small-budget fixture,
+3061953 bytes in the deliberately large-buffer isolation fixture.
+Those values are NOT general memory caps or speed improvements.
+
+Next: per-stream retained measurements, cancellation/overflow
+accounting invariants, high-concurrency stress, process RSS/copy
+and controlled direct-H3 vs shared HTTP benchmark. No main,
+merge, release, tag, version, Net::QUIC or Uniform changes.
 
 ## Independent QUIC output-stream flow control (2026-10-17)
 
