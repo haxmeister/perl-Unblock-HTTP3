@@ -10,6 +10,41 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## Dynamic native producer lifecycle regression (2026-10-18)
+
+Starting feature head da4789e588ff525fda1339002a88aab607752bfb.
+Main H3 still 97ef0048be212af34b21a7e1a65b3294f4d34b4c.
+Read upper four handoff/contract docs and all engine handoffs.
+Only authorized feature branches may change. Net::QUIC and
+Uniform::HTTP are read-only.
+
+Added t/01-native assertions for an unfinished first producer,
+late arrival of a second producer, native append accounting per
+stream, per-stream discard from simulated cancellation, dynamic
+active producer count after cancellation and after EOF, retained
+body after EOF, and repeated discard without underflow. Native
+regression commit e6c1cbb0e54b0dbe40ed6d29e5884e50983a3319
+PASSED full HTTP3 test matrix CI 39133563818. The original
+streaming producer production source is unchanged. No public
+NativeABI or version changes.
+
+Upper unified branch adds xt/linux-event-quic-join-cancel.t, a
+real QUIC/TLS test on one connection with 8192 soft native
+retention, a held 1 MiB response Reader, a second initially
+active producer cancelled mid-response, a late 512 KiB response
+joined after cancellation, and an independent fast response.
+It tests the retained-body counters, sha256, native
+on_drain/accepted-write contract, no duplicate terminal
+notification, cancellation idempotency, and buffer isolation.
+Upper pinned CI integration run 39133882442 was in progress
+at this checkpoint. Do not mark the live scenario verified
+until CI passes, and correct any newly exposed defects only
+within approved feature branches.
+
+Next: true dynamic join without prior cancellation, controlled
+RSS/allocation and direct-engine comparative benchmarks. No
+main updates, release, merge, tag or version bumps.
+
 ## Three-budget retained-byte observation (2026-10-17)
 
 The upper LinuxEvent integration now checks native per-stream
