@@ -10,6 +10,32 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## ACK wakeup experiment reverted (2026-10-18)
+
+The first H3 ACK-driven blocked-output wake experiment
+40868d12a343fc217a4aea01199c83ee5e511fe5 did NOT solve the
+six-stream stall. Upper CI 39141722608 failed the six-stream test and
+also regressed the previously passing three-stream independent-Reader
+test. Under multiple uncredited Readers it admitted more QUIC output
+without ensuring progress for an actively credited stream. Reverted
+Connection.pm exactly to the prior feature source content in
+b6f068fde2e279258f9247a7b8c26252245d8008. No ABI/version change.
+Reverted HTTP3 full test matrix 39142506332 PASS; interoperability
+39142506370 PASS. This is the currently authoritative feature source.
+Do not reintroduce sibling ACK unblocking without a demonstrated solution
+to the shared QUIC send-buffer saturation. Net::QUIC is read-only.
+
+Upper six-stream probe from CI 39142115478: during the stall, retained
+native producer bytes=23634, per-stream=4096,4125,4125,4096,3096,4096,
+active=6; blocked_output IDs=0,8,12,16,20; QUIC send_buffered_bytes=8192.
+ACK offsets were 36896,32768,32768,24599,1008,5. The currently credited
+Reader slow0 had delivered 36864 bytes but was stalled; siblings retained
+uncredited Reader data. Native vs QUIC and application receive credit
+must be distinguished. This is confirmed congestion/flow-control deadlock,
+not evidence of lost or duplicated payload. Root cause in QUIC scheduling
+versus H3 output handoff remains open; cannot change Net::QUIC under the
+current authorization. The upper reproducer must remain available.
+
 ## Six-stream connection-wide QUIC output starvation (2026-10-18)
 
 Upper feature added xt/linux-event-quic-six-credit.t: six independent
