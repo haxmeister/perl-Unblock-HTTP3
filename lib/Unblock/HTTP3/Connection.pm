@@ -4714,6 +4714,16 @@ Server-specific options include:
 
 Client-specific options include C<remembered_peer_settings>.
 
+C<send_buffer_limit> is an advisory limit for native streamed outgoing body
+bytes retained until acknowledgment, not a hard process or QUIC packet memory
+limit. The engine divides this budget among unfinished streaming producers,
+and a producer that returns false from C<write()> resumes through its own
+C<on_drain> after its retained bytes fall below its current share. This
+prevents another credit-blocked HTTP/3 stream from occupying all producer
+wakeups. A write is accepted in full before returning false, so individual
+large writes can exceed a stream's share or the configured soft budget.
+Buffering performed by Net::QUIC and the operating system is separate.
+
 =head1 COMMON METHODS
 
 C<start()> starts HTTP/3 processing.
