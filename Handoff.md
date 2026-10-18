@@ -10,6 +10,53 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## Fair-share native streamed send retention (2026-10-17 continuation)
+
+This slice addresses the outstanding HTTP3 aggregate-producer starvation
+exposed by three separately receive-credit-blocked readers on one QUIC
+connection with send_buffer_limit 8192. Main must remain untouched,
+and Net::QUIC and Uniform::HTTP remain read-only.
+
+The HTTP3.xs native streaming body now maintains a per-body retained-byte
+counter in addition to its existing aggregate counter. The counter changes
+on append, ACK and discard/removal. Internal XS accessors expose
+streaming_retained_bytes_for_stream(id) and
+active_streaming_body_count (unfinished streaming bodies).
+No public installed NativeABI layout changes.
+
+Connection->_streaming_share_limit divides the configured native
+send_buffer_limit by active streaming producers (minimum one byte).
+The write(false) advisory is now based on this stream's retained
+bytes versus its share, and _drain_body_producers invokes on_drain
+only for a producer whose own stream is below its share. This allows
+a consumer resuming stream0 to free its own retained bytes and
+wake producer0 even if other QUIC streams remain blocked.
+It does not blindly replay rejected writes or alter response identity.
+
+This is a SOFT fairness budget, not an allocation cap. Each write is
+accepted in full before the advisory, so one write per active stream
+can exceed its dynamic share. A per-stream counter itself does not
+bound QUIC retransmission, protocol or process allocations; it also
+does not constitute priority scheduling or a memory benchmark.
+The same soft send_buffer_limit option and application on_drain
+contract remain. Existing single-producer behavior uses the full limit.
+
+Native source commit 21bf5aba9aed9d2b7cae0460718df9ec1421d258;
+per-stream producer scheduling f4fc802bd9fcee7fc80e14401aca49a231244bb1;
+t/01-native accounting regression 96cf41e9378333fb4f7b48d89c8311c1dcf7cee7.
+Run 39098219790 PASSED engine Perl version matrix at scheduler source.
+Full latest native CI 39098239956 (including new assertions) pending
+at this checkpoint; inspect run status before calling this source verified.
+
+The upper unified CI workflow pins latest native source
+96cf41e9378333fb4f7b48d89c8311c1dcf7cee7,
+and runs xt/linux-event-quic-multi-credit.t with the 8192 native
+soft budget and a second 4 MiB isolated receive-credit budget.
+Upper run 39098276763 is pending. If tiny-budget still starves,
+inspect actual ACK/per-stream counters and scheduling ordering;
+do not claim a completed fix. Do not change main, release, tag,
+merge, bump versions, or edit read-only dependencies.
+
 ## Independent QUIC output-stream flow control (2026-10-17)
 
 The upper integration xt/linux-event-quic-multi-credit.t exposed a
