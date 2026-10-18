@@ -241,6 +241,22 @@ is(
 
 $retained_body = 'mutated-after-append';
 
+is(
+    $retained_client->active_streaming_body_count,
+    1,
+    'native tracks one unfinished streaming producer',
+);
+is(
+    $retained_client->streaming_retained_bytes_for_stream(0),
+    length('original-retained-body'),
+    'native tracks retained bytes on the owning request stream',
+);
+is(
+    $retained_client->streaming_retained_bytes_for_stream(4),
+    0,
+    'native reports zero bytes for an unknown stream',
+);
+
 $transfer_retained->();
 
 $retained_client->update_ack_offset(
@@ -252,6 +268,11 @@ is(
     $retained_client->streaming_retained_bytes,
     0,
     'ACK releases retained Perl body storage',
+);
+is(
+    $retained_client->streaming_retained_bytes_for_stream(0),
+    0,
+    'ACK also releases the owning stream retained-byte count',
 );
 
 my $retained_received = '';
