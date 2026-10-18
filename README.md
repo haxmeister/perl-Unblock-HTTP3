@@ -40,7 +40,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-The unreleased 0.13 release candidate requires:
+Unblock::HTTP3 0.13 requires:
 
 ```text
 Perl            5.20+
@@ -166,6 +166,42 @@ See [the installed integration guide](lib/Unblock/HTTP3/Integration.pm) and
 programs are in [server](examples/linux-event-server.pl) and
 [client](examples/linux-event-client.pl). The transport examples require
 Linux::Event 0.117 or later, but it is not a distribution dependency.
+
+## Incoming body reception
+
+Incoming request and response bodies are buffered by default, with a finite
+64 MiB per-transaction limit. Configure `max_buffered_body_bytes` on the
+Client or Server to reduce this limit. The complete body is installed on the
+same Uniform message object before the body-completion callback; an empty
+completed body is the empty string. Header callbacks run before body arrival.
+
+Register `on_data` at request creation or during the incoming-header callback
+to receive chunks without retaining a second full body. For example:
+
+```perl
+my $tx = $client->request(
+    method    => 'GET',
+    target    => '/',
+    scheme    => 'https',
+    authority => 'example.com',
+    on_data   => sub {
+        my ($tx, $bytes) = @_;
+        process_bytes($bytes);
+    },
+    on_finish => sub {
+        my ($tx) = @_;
+        report_terminal_state($tx->state, $tx->error);
+    },
+);
+```
+
+On a Server, call `$tx->on_data(sub { ... })` inside `on_request` to select
+streaming for that incoming request. Do not combine `on_data` with the legacy
+`on_body` callback. Registration after body delivery has started is rejected.
+`on_finish` runs once after the transaction reaches complete, cancelled, or
+error state; it is not merely an incoming-body completion event. A receive
+limit failure resets the affected HTTP/3 stream without failing unrelated
+transactions. Consult the Client, Server and Transaction POD for details.
 
 ## Streaming bodies
 

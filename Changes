@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP3
 
-0.13  2026-10-18 (release candidate; not yet published)
+0.13  2026-10-18
     - Add bounded buffered HTTP/3 receive lifecycle and per-transaction
       on_data/on_finish callbacks for the unified Unblock::HTTP layer.
     - Keep the same native transaction and canonical Uniform message identity;

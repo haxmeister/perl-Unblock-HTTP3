@@ -1,3 +1,36 @@
+## HTTP3 0.13 release verification with released Net::QUIC 0.05 (2026-10-18)
+
+Feature candidate 1bed34bc19213df6066fc72668cf0b9930de0d51:
+Net::QUIC 0.05 installed directly from CPAN tarball
+(Net-QUIC-0.05.tar.gz; no development source install). The previous
+exact-0.04 assertions in seven tests were corrected, without weakening
+protocol or producer-flow assertions. Full H3 test workflow 39155065291
+PASS all four Linux Perl jobs (5.20, 5.28, 5.36, 5.44). Perl 5.44
+also PASS distcheck, disttest of Unblock-HTTP3-0.13.tar.gz, installed
+NativeABI smoke and complete public POD syntax checks.
+
+The 0.13 production code was validated in interoperability workflow
+39154958488: quic-go independent client and external public H3 servers
+both PASS. Optional Linux::Event real UDP/QUIC/TLS example smoke workflow
+39154958508 PASS. Benchmark smoke workflow 39154810871 PASS against
+CPAN Net::QUIC 0.05 (not a performance gate). These jobs predate the
+final version/test-assertion-only cleanup but use identical production
+HTTP3/XS code and CPAN Net::QUIC dependency.
+
+Unified upper feature commit 1e1645d6c4d7afbde50adb3ea0bd09deba2ec13c
+changed the integration workflow to install CPAN Net::QUIC 0.05 and pin this
+HTTP3 candidate 1bed34bc. Upper integration run 39155180473 PASS:
+distribution tests, full 13-file real TCP/QUIC smoke set including the
+six held 1 MiB HTTP3 producers + independent fast response, 128 KiB and
+4 MiB budget variants, and direct/unified benchmark smokes. The original
+sha256, progress, fairness, terminal, Reader credit and native-byte
+accounting assertions were preserved. No Net::QUIC/HTTP1/HTTP2 source
+changes were made for this candidate.
+
+Audit still requires maintainer authorization for merge, tag and publication.
+The 0.13 distribution is release-prepared but not released; HTTP3 main is
+untouched. Latest changes after verification are documentation-only.
+
 ## Net::QUIC 0.05 published dependency and HTTP3 0.13 release candidate (2026-10-18)
 
 Net::QUIC 0.05 has been released to GitHub/CPAN. HTTP3 uses the released
