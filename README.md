@@ -1,8 +1,8 @@
 # Unblock::HTTP3
 
 Development branch: `feature/unified-receive-lifecycle` adds bounded receive
-buffers and transaction `on_data` / `on_finish` callbacks. These changes are
-not released. See `Handoff.md` for validation and continuation instructions.
+buffers, transaction `on_data` / `on_finish` callbacks, and Net::QUIC 0.05
+credit-aware output. These changes are not yet released. See `Handoff.md` for validation and continuation instructions.
 
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP3.svg)](https://metacpan.org/dist/Unblock-HTTP3)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP3.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP3)
@@ -40,12 +40,12 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-Unblock::HTTP3 0.12 requires:
+This feature branch requires:
 
 ```text
 Perl            5.20+
 Alien::nghttp3  0.01+
-Net::QUIC       0.04+
+Net::QUIC       0.05+
 Uniform::HTTP   0.06+
 ```
 
