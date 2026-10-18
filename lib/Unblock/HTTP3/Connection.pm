@@ -1212,6 +1212,7 @@ sub _new {
         pending_early_datagrams    => {},
         ready_informational => [],
         output_finished   => {},
+        blocked_output    => {},
         response_sent     => {},
     }, $class;
 }
@@ -2842,6 +2843,7 @@ sub _cleanup_stream_if_done {
     delete $self->{stream_lifecycle}{$id};
     delete $self->{trailer_field_section_size}{$id};
     delete $self->{output_finished}{$id};
+    delete $self->{blocked_output}{$id};
     delete $self->{response_sent}{$id};
     delete $self->{body_bytes_sent}{$id};
     delete $self->{rejected_streams}{$id};
@@ -3648,6 +3650,12 @@ sub _service_stream {
     }
 
     if ($stream->can_send && !$self->{rejected_streams}{$id}) {
+        # Activity may indicate ACKs or new QUIC send credit. Allow nghttp3
+        # to retry this stream, but re-block it if QUIC still accepts only
+        # a partial write. Other streams must remain eligible meanwhile.
+        if (delete $self->{blocked_output}{$id}) {
+            $self->{native}->unblock_stream($id);
+        }
         my $acked_offset = $stream->acked_offset;
 
         if (
@@ -4630,7 +4638,13 @@ sub _drain_output {
             $self->_maybe_complete_transaction($id);
         }
 
-        last if $accepted < $length;
+        if ($accepted < $length) {
+            # nghttp3 otherwise repeatedly chooses a flow-control-blocked
+            # stream and prevents other H3 streams from making progress.
+            $self->{native}->block_stream($id);
+            $self->{blocked_output}{$id} = 1;
+            next;
+        }
         last if !$length && !$fin;
     }
 
