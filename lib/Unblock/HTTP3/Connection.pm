@@ -4580,7 +4580,7 @@ sub _drain_output {
             );
             my $length = length($remaining);
             my $accepted = $length
-                ? $stream->send_some($remaining)
+                ? $stream->send_some($remaining, limit_to_credit => 1)
                 : 0;
 
             $pending->{offset} += $accepted;
@@ -4638,7 +4638,7 @@ sub _drain_output {
         my $accepted = 0;
 
         if ($length) {
-            $accepted = $stream->send_some($bytes);
+            $accepted = $stream->send_some($bytes, limit_to_credit => 1);
         }
 
         $self->{native}->add_write_offset($id, $accepted);
