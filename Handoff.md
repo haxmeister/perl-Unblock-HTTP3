@@ -10,6 +10,41 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## Six-stream connection-wide QUIC output starvation (2026-10-18)
+
+Upper feature added xt/linux-event-quic-six-credit.t: six independent
+1 MiB streamed responses and a fast response on one real authenticated QUIC
+connection, under an 8192-byte advisory native retained-body budget.
+Each slow pull Reader owns 32768 bytes receive credit, released sequentially.
+The original three-stream fixture and the new no-cancellation producer-join
+fixtures passed, but six-stream upper runs 39141085484 and 39141149693
+reproduced a 60s watchdog: streams 0 and 1 completed, while streams 2-5
+accepted one 4096-byte write apiece, got write(false), and never resumed.
+The test did NOT weaken the six-producer requirement.
+
+The H3 Connection::_drain_output bridge blocks an nghttp3 stream when
+QUIC send_some accepts only part of its pending bytes. Previously,
+Connection::_service_stream unblocked only a stream that got its OWN QUIC
+send activity. A stream blocked before its first accepted QUIC bytes can
+lack its own ACK event, although another stream's ACK has freed shared
+QUIC send-buffer room. This can strand nghttp3's blocked writer.
+
+Feature production commit 40868d12a343fc217a4aea01199c83ee5e511fe5
+adds _unblock_output_contenders, triggered only when an actual per-stream
+ACK offset advances, so all live blocked writers may retry on shared QUIC
+send-capacity recovery. The original per-stream flow-control and native
+accepted-byte accounting remain unchanged; no looping on permanently
+blocked output without new ACK progress. Lifecycle stores last ACK offset
+with the existing stream lifecycle state (cleaned up on release).
+
+HTTP3 CI test matrix 39141613551 PASSED (Perl 5.20, 5.28, 5.36, 5.44).
+HTTP3 interoperability 39141613659 PASSED (quic-go client and public H3
+servers). The upper integration workflow pins this exact engine production
+commit at upper source 920eec03ad992766eb2f28a90eca9c5024968173.
+Its six-producer live result is not yet verified; inspect the upper run
+39141722608 and resolve any remaining starvation before marking complete.
+No main, version, tag, release or read-only dependency change.
+
 ## Dynamic native producer lifecycle regression (2026-10-18)
 
 Starting feature head da4789e588ff525fda1339002a88aab607752bfb.
