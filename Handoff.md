@@ -13,6 +13,14 @@ HTTP3 distribution and all 15 Perl module versions are prepared as 0.13;
 PAUSE metadata assertions and distribution artifact names are aligned.
 Public NativeABI remains version 1; no unrelated public API changes.
 
+The first 0.05 source-free CPAN workflow 39154810862 confirmed successful
+Net::QUIC 0.05 download/build and HTTP3 compilation. It found seven
+older exact-0.04 test expectations in t/04, t/11, t/13, t/14, t/17,
+t/18 and t/24, corrected after the 0.13 versioning commit.
+Independent interop 39154810950, Linux::Event smoke 39154810880,
+and benchmark 39154810871 passed against CPAN Net::QUIC 0.05,
+but those earlier runs preceded the final 0.13 candidate.
+
 This is NOT released or merged. CI, disttest, POD, real-QUIC interoperability,
 Linux::Event smoke and upper six-producer published-dependency integration
 require fresh verification at this new feature head. Prior source-pinned

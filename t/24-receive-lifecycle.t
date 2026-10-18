@@ -17,7 +17,7 @@ use Net::QUIC::Driver;
 use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
 
-is($Net::QUIC::VERSION, '0.04', 'vertical slice uses CPAN Net::QUIC 0.04');
+is($Net::QUIC::VERSION, '0.05', 'vertical slice uses CPAN Net::QUIC 0.05');
 
 my $cert_file = "$FindBin::Bin/fixtures/localhost-cert.pem";
 my $key_file = "$FindBin::Bin/fixtures/localhost-key.pem";

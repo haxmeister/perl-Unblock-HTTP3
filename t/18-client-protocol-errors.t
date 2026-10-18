@@ -14,8 +14,8 @@ use Unblock::HTTP3::Connection;
 
 is(
     $Net::QUIC::VERSION,
-    '0.04',
-    'client protocol error tests use released Net::QUIC 0.04',
+    '0.05',
+    'client protocol error tests use released Net::QUIC 0.05',
 );
 
 my $cert_file = "$FindBin::Bin/fixtures/localhost-cert.pem";

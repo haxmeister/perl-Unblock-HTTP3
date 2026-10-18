@@ -14,7 +14,7 @@ use Unblock::HTTP3::Connection;
 use Unblock::HTTP3::Server;
 use Uniform::HTTP::Request;
 
-is($Net::QUIC::VERSION, '0.04', 'HTTP Datagrams use released Net::QUIC 0.04');
+is($Net::QUIC::VERSION, '0.05', 'HTTP Datagrams use released Net::QUIC 0.05');
 
 my $cert_file = "$FindBin::Bin/fixtures/localhost-cert.pem";
 my $key_file = "$FindBin::Bin/fixtures/localhost-key.pem";
