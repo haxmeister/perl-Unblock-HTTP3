@@ -129,7 +129,13 @@ my $transaction = $client->request(
 Many Transactions can be active on one Client at the same time.
 
 The existing pull interface remains available through `next_transaction()`
-and `next_informational()` for integrations that prefer polling.
+and `next_informational()` for integrations that prefer polling. Pull-only
+notifications retain a strong Transaction reference until retrieved.
+When callbacks deliver a Transaction, its optional pull-queue notification
+is weak: it remains accessible while the application or active engine holds
+the Transaction, but it does not retain completed response bodies indefinitely.
+Callback handlers should retain the Transaction themselves if they need it
+after completion. The Server follows the same rule for `on_request`.
 
 ## Server
 

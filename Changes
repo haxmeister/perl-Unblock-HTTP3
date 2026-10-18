@@ -9,6 +9,12 @@ Revision history for Unblock-HTTP3
       optional credit-limited Stream->send_some in the HTTP/3 output bridge.
     - Rely on Net::QUIC 0.05 targeted shared-capacity waiter notifications,
       preserving fair progress under multiple slow streaming producers.
+    - Avoid unbounded retention of completed callback-delivered HTTP/3
+      Transactions and body buffers in optional pull-notification queues.
+      Retain strong pull-only semantics; mixed callback/pull access works
+      while the Transaction is live.
+    - Add sustained 2048-request real-QUIC memory and notification-queue
+      regression coverage through the unified integration.
     - Remove temporary development Net::QUIC source pins from GitHub Actions.
     - Retain native consumer ABI version 1 and the existing public HTTP/3 API.
 
