@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(croak);
 use Uniform::HTTP::Request 0.06 ();
 use Uniform::HTTP::Response 0.06 ();
-use Scalar::Util qw(blessed weaken);
+use Scalar::Util qw(blessed isweak weaken);
 use Time::HiRes ();
 
 use Unblock::HTTP3 ();
@@ -1761,7 +1761,19 @@ sub _enqueue_delivery {
         # bounds that stale tail without scanning on every request. Strong
         # pull-only entries must remain queued until explicitly retrieved.
         if (++$self->{weak_delivery_insertions}{$queue_name} >= 64) {
-            @$queue = grep { defined $_ } @$queue;
+            # Copying an SV with grep/map turns a weak reference strong.
+            # Compact in place and restore the weakness of moved entries.
+            my $write = 0;
+            for my $read (0 .. $#$queue) {
+                next unless defined $queue->[$read];
+                if ($write != $read) {
+                    my $was_weak = isweak($queue->[$read]);
+                    $queue->[$write] = $queue->[$read];
+                    weaken($queue->[$write]) if $was_weak;
+                }
+                ++$write;
+            }
+            splice @$queue, $write;
             $self->{weak_delivery_insertions}{$queue_name} = 0;
         }
     }

@@ -83,6 +83,10 @@ for (1 .. 512) {
 }
 cmp_ok(scalar @{ $conn->{ready_transactions} }, '<=', 66,
     'live old callback head does not trap unbounded expired weak entries');
+ok(isweak($conn->{ready_transactions}[0]),
+    'compacted live callback head stays weak');
+ok(!isweak($conn->{ready_transactions}[1]),
+    'compacted queued pull-only Transaction stays strong');
 is(refaddr($conn->next_transaction), $held_head_id,
     'compaction preserves oldest live callback notification');
 is(refaddr($conn->next_transaction), $pull_behind_id,
@@ -99,6 +103,8 @@ for (1 .. 512) {
 }
 cmp_ok(scalar @{ $conn->{ready_informational} }, '<=', 65,
     'informational callback queue also compacts expired non-head entries');
+ok(isweak($conn->{ready_informational}[0]),
+    'compacted informational head stays weak');
 is(refaddr($conn->next_informational), $held_info_id,
     'live informational notification survives compaction');
 is($conn->next_informational, undef,

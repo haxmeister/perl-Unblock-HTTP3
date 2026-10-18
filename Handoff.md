@@ -1,3 +1,26 @@
+## Compaction must preserve weak references (2026-10-18)
+
+The initial weak-tail pruning attempt 3f194ec51b19de73a986612763954c4184cb21d6
+used grep into a new Perl array. It FAILED t/27 on all four Linux Perl
+matrix jobs in Actions 39171819978: copying weak references through
+grep promotes surviving references to strong, causing renewed retention
+and breaking callback weak-slot expectations. That candidate is NOT valid
+for integration/release. The newly added live-head tests exposed it.
+
+This correction compacts the existing Perl array in one forward pass,
+testing isweak() before each move, restoring weakness on moved weak slots,
+and using splice only to truncate the discarded tail. Pure pull entries
+remain strong, callback entries stay weak, order is stable. The test
+adds explicit post-compaction isweak assertions for both queue kinds
+and strong pull-only elements, in addition to length/FIFO checks.
+The compaction is every 64 callback inserts, never per body byte.
+
+Re-run the four-version standalone matrix and independent H3 interop
+on this new commit, then update upper integration pins and rerun the
+published Net::QUIC 0.05 2048-request profiler. Do not infer success
+from the initial failing candidate. No main, tag, release, version bump
+or Net::QUIC changes.
+
 ## Bounded callback notification queue length (2026-10-18)
 
 The upper unified Client ownership cycle was fixed at upper commit
