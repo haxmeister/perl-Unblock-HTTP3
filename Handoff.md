@@ -58,13 +58,26 @@ threshold, not per-stream fair reservations. Saturating it with
 several streams that individually lack credit can prevent an otherwise
 unblocked producer from obtaining its next on_drain. Do not claim
 independent producer fairness or a global memory cap is solved.
-The next upper fixture uses a 4 MiB cap (larger than its three 1 MiB
-bodies) to isolate actual QUIC receive-credit independence from
-global native send-buffer saturation. The single-Reader regression
-still tests true accepted-write producer backpressure with 8192.
-If independent readers pass, follow up separately on a fair bounded
-aggregate producer schedule and per-stream accounting. Do not weaken
-the live fairness issue into a passing claim.
+The revised upper fixture uses a 4 MiB cap (larger than its three
+1 MiB bodies) to isolate actual QUIC receive-credit independence
+from global native send-buffer saturation. The single-Reader
+regression still exercises accepted-write producer backpressure
+with the 8192 native retained-byte threshold.
+
+The isolated concurrent Reader test PASSED on upper source
+ceeca6638e6faf6f2561089fcaaf3d5ad0c626d7, CI
+39096607845: 552 distribution checks and 446 real TCP/QUIC
+checks. Three Readers were separately held at 32739 bytes
+each and subsequently consumed sequentially, with a fast
+fourth stream completing before release. Native producers had
+already accepted all their 1 MiB bodies under the intentionally
+large 4 MiB threshold. This is receive-credit isolation, NOT
+a resolution of global producer fairness.
+
+Next: a fair bounded aggregate producer schedule and per-stream
+retained accounting. The earlier tiny-global-buffer watchdog
+remains a genuine unresolved regression; do not weaken it into
+a passing claim.
 
 ## H3 request stream credit continuation (2026-10-17)
 
