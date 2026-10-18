@@ -2370,21 +2370,32 @@ sub _write_transaction_body {
     $self->_drain_output;
     $self->_maybe_complete_transaction($id);
 
-    return $self->{native}->streaming_retained_bytes
-        < $self->{send_buffer_limit}
-        ? 1
-        : 0;
+    # Each active streaming producer gets a share of the native retained
+    # body budget. A QUIC-credit-blocked stream must not withhold every
+    # other producer's on_drain merely because its own data remains queued.
+    # A complete write is accepted before this advisory return; one write
+    # can exceed its share, so this is NOT a hard memory or packet limit.
+    return $self->{native}->streaming_retained_bytes_for_stream($id)
+        < $self->_streaming_share_limit ? 1 : 0;
+}
+
+sub _streaming_share_limit {
+    my ($self) = @_;
+    my $count = $self->{native}->active_streaming_body_count;
+    return $self->{send_buffer_limit} if $count < 2;
+    my $share = int($self->{send_buffer_limit} / $count);
+    return $share || 1;
 }
 
 sub _drain_body_producers {
     my ($self) = @_;
 
-    return
-        if $self->{native}->streaming_retained_bytes
-            >= $self->{send_buffer_limit};
-
+    my $share = $self->_streaming_share_limit;
     for my $transaction (values %{ $self->{transactions} }) {
         next if $transaction->is_terminal;
+        my $id = $transaction->stream_id;
+        next if $self->{native}->streaming_retained_bytes_for_stream($id)
+            >= $share;
 
         if (my $body = $transaction->_request_body_object) {
             $body->_drain;
