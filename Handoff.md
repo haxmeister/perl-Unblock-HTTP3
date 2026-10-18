@@ -10,6 +10,39 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## Opt-in standalone NetQUIC transmit-credit admission (2026-10-18)
+
+User authorized a separate Net::QUIC feature branch but requires Net::QUIC to
+remain independently useful (no HTTP/3, Unblock, or event-loop dependency).
+Net::QUIC feature/fair-stream-send-capacity preserves the default
+Stream->send_some($bytes) behavior exactly, including queueing bytes beyond
+peer flow credit. An OPTIONAL named per-call parameter
+limit_to_credit => 1 admits only current stream/connection peer send credit
+minus all not-yet-sent queued data. It preserves the existing connection
+buffer cap and accepted-prefix contract, and newly wakes the existing
+on_stream_activity callback when ngtcp2 peer stream credit expands.
+Standalone NetQUIC full CI 39146133370 PASS all 15 jobs, Linux Perl
+5.20-5.44 and Windows/macOS; no HTTP/3 dependencies or method aliases.
+
+This HTTP3 branch uses the opt-in only inside Connection::_drain_output's
+ordinary and SETTINGS QUIC Stream->send_some bridge. Feature source
+9d329e2adb64e0a71d58ee549f947b8972190d18. Feature-only CI scripts
+pin a confirmed Net::QUIC commit; H3 test and interoperability workflows
+39146362177 and 39146357011 PASS, plus Linux::Event smoke 39146362182.
+Neither H3 public API nor its version changed. Never use this feature code
+with the released Net::QUIC 0.04 unconditionally: release coordination is
+not yet approved, and release branches must remain untouched.
+
+The upper six-producer live CI 39146210996 remains RED even with the credit
+admission option: two large streams finish, then native H3 output on four
+others remains blocked with QUIC retained TX=0. This disproves the idea
+that over-queueing beyond peer credit is the only source of starvation.
+The upper diagnostic run 39146629367 pins NetQUIC diagnostic-only
+commit da9ed57aa46d7bc508afae6601c402fe592b5264 and prints native
+MAX_DATA/MAX_STREAM_DATA credit, unsent queue lengths, and blocked IDs.
+Inspect before modifying output scheduling again. H3 ACK broadcast retry
+experiment was already reverted; do not reintroduce it. No main/merge/tag.
+
 ## ACK wakeup experiment reverted (2026-10-18)
 
 The first H3 ACK-driven blocked-output wake experiment
