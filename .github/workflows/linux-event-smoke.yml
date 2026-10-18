@@ -27,6 +27,7 @@ jobs:
         run: |
           cpanm --notest 'Alien::nghttp3@0.01'
           cpanm --notest 'Net::QUIC@0.04'
+          sh .github/scripts/install-net-quic-feature.sh
           cpanm --notest 'Uniform::HTTP@0.06'
           cpanm --notest 'Linux::Event@0.117'
           cpanm --notest --installdeps .
