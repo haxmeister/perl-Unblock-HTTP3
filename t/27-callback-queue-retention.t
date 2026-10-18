@@ -110,4 +110,41 @@ is(refaddr($conn->next_informational), $held_info_id,
 is($conn->next_informational, undef,
     'expired informational notifications are skipped after compaction');
 
+# Compaction must preserve the weakness of LIVE entries that actually
+# move to an earlier array index, not only the unchanged weak head.
+my $front_live = bless {}, 'Local::Transaction';
+my $front_live_id = refaddr($front_live);
+$conn->_enqueue_delivery('ready_transactions', $front_live, 1);
+{
+    my $expired_gap = bless {}, 'Local::Transaction';
+    $conn->_enqueue_delivery('ready_transactions', $expired_gap, 1);
+}
+my $moved_live = bless {}, 'Local::Transaction';
+my $moved_live_id = refaddr($moved_live);
+$conn->_enqueue_delivery('ready_transactions', $moved_live, 1);
+my $moved_pull = bless {}, 'Local::Transaction';
+my $moved_pull_id = refaddr($moved_pull);
+$conn->_enqueue_delivery('ready_transactions', $moved_pull, 0);
+undef $moved_pull;
+for (1 .. 128) {
+    my $expired = bless {}, 'Local::Transaction';
+    $conn->_enqueue_delivery('ready_transactions', $expired, 1);
+}
+cmp_ok(scalar @{ $conn->{ready_transactions} }, '<=', 66,
+    'periodic sweep removes expired gap and tail behind live callbacks');
+ok(isweak($conn->{ready_transactions}[0]),
+    'original weak head remains weak after compaction');
+ok(isweak($conn->{ready_transactions}[1]),
+    'moved live callback notification remains weak after compaction');
+ok(!isweak($conn->{ready_transactions}[2]),
+    'moved pull-only notification remains strong after compaction');
+is(refaddr($conn->next_transaction), $front_live_id,
+    'original live callback delivered in FIFO order');
+is(refaddr($conn->next_transaction), $moved_live_id,
+    'moved live weak callback delivered next in FIFO order');
+is(refaddr($conn->next_transaction), $moved_pull_id,
+    'moved strong pull notification remains retrievable');
+is($conn->next_transaction, undef,
+    'no expired weak entries survive retrieval');
+
 done_testing;
