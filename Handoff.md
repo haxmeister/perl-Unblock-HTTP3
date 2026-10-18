@@ -43,12 +43,28 @@ Fix on this HTTP3 FEATURE BRANCH ONLY:
 
 Fix source commit 14eaaf2f94173650b830799a2f43fca0c77ab0a1
 (preceded by XS commit 2a88fd5f092526985a2fb093dfd9607a2422b951).
-Full HTTP3 matrix run 39095993708 PASSED on Linux Perl
-5.20/5.28/5.36/5.44. Interoperability run 39095993713 and
-unified live integration run 39096018997 were still in progress at
-this checkpoint. The unified workflow pins the exact fix source.
-Do not call the multi-stream regression verified until that
-run passes.
+Full HTTP3 matrix 39095993708 PASSED on Linux Perl 5.20/5.28/5.36/5.44;
+HTTP3 interop 39095993713 PASSED. The first pinned upper regression
+39096018997 still FAILED with a 45s watchdog; merely blocking nghttp3
+stream selection is NOT a complete fix under this fixture's tiny
+global retained-body threshold. Even raising the upper test's global
+H3 send_buffer_limit from 8192 to 131072 leaves other stalled
+producers consuming aggregate capacity; upper run 39096310032 failed.
+With three held Readers, producer0 received 90112 of 1048576 bytes
+after release and no further on_drain; two peers remained held.
+
+The H3 send_buffer_limit is a CONNECTION-WIDE native retained-body
+threshold, not per-stream fair reservations. Saturating it with
+several streams that individually lack credit can prevent an otherwise
+unblocked producer from obtaining its next on_drain. Do not claim
+independent producer fairness or a global memory cap is solved.
+The next upper fixture uses a 4 MiB cap (larger than its three 1 MiB
+bodies) to isolate actual QUIC receive-credit independence from
+global native send-buffer saturation. The single-Reader regression
+still tests true accepted-write producer backpressure with 8192.
+If independent readers pass, follow up separately on a fair bounded
+aggregate producer schedule and per-stream accounting. Do not weaken
+the live fairness issue into a passing claim.
 
 ## H3 request stream credit continuation (2026-10-17)
 
