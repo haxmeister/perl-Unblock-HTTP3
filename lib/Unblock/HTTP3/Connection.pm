@@ -2387,6 +2387,22 @@ sub _streaming_share_limit {
     return $share || 1;
 }
 
+# QUIC's output queue is connection-wide. If send_some() could not accept
+# even the first byte for a stream, it has no in-flight bytes of its own
+# to ACK and may receive no further per-stream send activity. ACK progress
+# on ANY sibling can create room for that blocked stream. Retry pending
+# writers at that point; do not spin or force a write from this callback.
+sub _unblock_output_contenders {
+    my ($self) = @_;
+    for my $id (keys %{ $self->{blocked_output} }) {
+        my $stream = $self->{streams}{$id};
+        next unless $stream && $stream->can_send;
+        delete $self->{blocked_output}{$id};
+        $self->{native}->unblock_stream($id);
+    }
+    return;
+}
+
 sub _drain_body_producers {
     my ($self) = @_;
 
@@ -3660,6 +3676,7 @@ sub _service_stream {
         }
     }
 
+    my $lifecycle = $self->{stream_lifecycle}{$id} ||= {};
     if ($stream->can_send && !$self->{rejected_streams}{$id}) {
         # Activity may indicate ACKs or new QUIC send credit. Allow nghttp3
         # to retry this stream, but re-block it if QUIC still accepts only
@@ -3683,16 +3700,22 @@ sub _service_stream {
             }
         }
 
+        my $previous_ack = $lifecycle->{last_acked_offset} // 0;
         $self->{native}->update_ack_offset(
             $id,
             $acked_offset,
         );
+        if ($acked_offset > $previous_ack) {
+            $lifecycle->{last_acked_offset} = $acked_offset;
+            # Shared QUIC retention can free up while an unrelated stream
+            # has no local ACK/activity to wake its blocked nghttp3 writer.
+            $self->_unblock_output_contenders;
+        }
         $self->_drain_events;
         return if $self->{failed};
         $self->_drain_body_producers;
     }
 
-    my $lifecycle = $self->{stream_lifecycle}{$id} ||= {};
 
     my $remote_reset = $stream->remote_reset_code;
     if (defined($remote_reset) && !$lifecycle->{remote_reset_seen}) {
