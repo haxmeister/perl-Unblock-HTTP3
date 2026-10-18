@@ -1,3 +1,15 @@
+## Independent callback/pull queue lifetime regression (2026-10-18)
+
+t/27-callback-queue-retention.t exercises internal notification queues
+without a UDP connection: pull-only entries stay strong until retrieved,
+callback entries are weak but remain available when the caller still
+holds a Transaction, expired entries are skipped/pruned, and informational
+notifications follow the same policy. A 128-item callback-only loop
+checks queue growth remains bounded. The MANIFEST now includes the new
+test and previously documented performance copy-boundary audit. The
+live loopback test still validates the real callback and hybrid paths.
+Rerun distribution and real-QUIC tests before declaring release ready.
+
 ## Native HTTP3 callback notification retention fix (2026-10-18)
 
 Upper sustained real-QUIC profiler on published Net::QUIC 0.05 confirmed

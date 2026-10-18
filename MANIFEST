@@ -9,6 +9,7 @@ docs/APPLICATION-API.md
 docs/ARCHITECTURE.md
 docs/NATIVE-ABI.md
 docs/RFC-COMPLIANCE.md
+docs/PERFORMANCE-COPY-BOUNDARIES.md
 examples/linux-event-client.pl
 examples/linux-event-server.pl
 lib/Unblock/HTTP3.pm
@@ -56,3 +57,4 @@ t/23-pause-indexing.t
 t/24-receive-lifecycle.t
 t/25-terminal-callbacks.t
 t/26-request-capacity.t
+t/27-callback-queue-retention.t
