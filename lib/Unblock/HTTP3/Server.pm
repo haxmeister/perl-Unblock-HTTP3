@@ -165,6 +165,12 @@ Starts HTTP/3 processing and installs the QUIC stream callbacks. For ordinary
 =head2 next_transaction
 
 Returns the next newly received request Transaction for pull-style users.
+Pull-only requests remain strongly queued until retrieved. When C<on_request>
+also delivers the Transaction, its queue notification is weak. A mixed
+callback/pull consumer may retrieve the live Transaction, but should keep
+the callback's Transaction reference if it needs it after the request
+becomes terminal and the native stream closes. Callback-only servers do
+not retain all completed request bodies through this optional pull queue.
 
 =head2 quic
 

@@ -234,8 +234,14 @@ For ordinary requests, the Net::QUIC connection must be ready first.
 
 =head2 next_transaction
 
-Pulls the next Transaction available from the engine. The callback API does
-not require polling.
+Pulls the next Transaction available from the engine. Pull-only
+Transactions stay strongly queued until retrieved. When a response is also
+delivered through C<on_response>, C<on_complete>, C<on_body>, C<on_data>,
+or C<on_finish>, its pull notification is weak: keep the Transaction
+received from the callback if it must survive beyond its terminal
+lifecycle. Callback delivery does not accumulate completed Transactions
+and bodies in a second strong queue. The callback API does not require
+polling; mixed callers can still pull a live Transaction.
 
 =head2 next_informational
 

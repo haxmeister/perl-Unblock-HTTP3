@@ -1744,12 +1744,33 @@ sub request {
     return $transaction;
 }
 
+# Callback consumers already own their transaction. Weak queue slots
+# preserve prompt mixed callback/pull reads without pinning every completed
+# request and response for the life of a multiplexed connection. Pure pull
+# entries remain strong, so an application may retrieve them later.
+sub _enqueue_delivery {
+    my ($self, $queue_name, $transaction, $callback_owned) = @_;
+
+    my $queue = $self->{$queue_name};
+    shift @$queue while @$queue && !defined $queue->[0];
+    push @$queue, $transaction;
+    weaken($queue->[-1]) if $callback_owned;
+    return;
+}
+
+sub _next_delivery {
+    my ($self, $queue_name) = @_;
+    my $queue = $self->{$queue_name};
+    shift @$queue while @$queue && !defined $queue->[0];
+    return shift @$queue;
+}
+
 sub next_transaction {
     my ($self, @args) = @_;
 
     croak 'next_transaction() does not accept arguments' if @args;
     $self->_service if $self->{started} && !$self->{failed};
-    return shift @{ $self->{ready_transactions} };
+    return $self->_next_delivery('ready_transactions');
 }
 
 sub next_informational {
@@ -1757,7 +1778,7 @@ sub next_informational {
 
     croak 'next_informational() does not accept arguments' if @args;
     $self->_service if $self->{started} && !$self->{failed};
-    return shift @{ $self->{ready_informational} };
+    return $self->_next_delivery('ready_informational');
 }
 
 sub _request_contract {
@@ -3224,7 +3245,11 @@ sub _promote_accepted_early_transactions {
             }
         }
 
-        push @{ $self->{ready_transactions} }, $transaction;
+        $self->_enqueue_delivery(
+            'ready_transactions',
+            $transaction,
+            defined($self->{callbacks}{on_request}) ? 1 : 0,
+        );
 
         if (defined $self->{callbacks}{on_request}) {
             my $result = $transaction->_invoke(
@@ -4179,7 +4204,11 @@ sub _finish_headers {
             }
 
             $transaction->_enable_datagrams if $datagrams;
-            push @{ $self->{ready_transactions} }, $transaction;
+            $self->_enqueue_delivery(
+                'ready_transactions',
+                $transaction,
+                defined($self->{callbacks}{on_request}) ? 1 : 0,
+            );
 
             if (defined $self->{callbacks}{on_request}) {
                 my $result = $transaction->_invoke(
@@ -4225,7 +4254,11 @@ sub _finish_headers {
                 if $fin;
 
             $transaction->_push_informational($message);
-            push @{ $self->{ready_informational} }, $transaction;
+            $self->_enqueue_delivery(
+                'ready_informational',
+                $transaction,
+                defined($transaction->{callbacks}{on_informational}) ? 1 : 0,
+            );
             my $result = $transaction->_invoke(
                 'on_informational',
                 $message,
@@ -4253,7 +4286,14 @@ sub _finish_headers {
                 if defined($writer) && !$writer->is_complete;
         }
 
-        push @{ $self->{ready_transactions} }, $transaction;
+        my $callback = $transaction->{callbacks};
+        $self->_enqueue_delivery(
+            'ready_transactions',
+            $transaction,
+            ($callback->{on_response} || $callback->{on_complete}
+                || $callback->{on_body} || $callback->{on_data}
+                || $callback->{on_finish}) ? 1 : 0,
+        );
     }
 
     my $lifecycle = $self->{stream_lifecycle}{$id};

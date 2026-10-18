@@ -1,3 +1,32 @@
+## Native HTTP3 callback notification retention fix (2026-10-18)
+
+Upper sustained real-QUIC profiler on published Net::QUIC 0.05 confirmed
+approximately linear direct and unified client private/PSS growth over
+2048 completed requests. Live HTTP3 transactions and streams were
+bounded near the 16-inflight limit, but ready_transactions retained
+2176 strong entries (128 warmup plus 2048 measured) in BOTH modes.
+This was an unbounded duplicate strong retention path for callback
+users, not evidence of active-stream cleanup failure.
+
+The HTTP3 feature now stores callback-delivered Transaction
+notifications as WEAK slots in ready_transactions and
+ready_informational. The engine's actual active transaction map stays
+strong until terminal/stream close. Pull-only notifications remain
+strong, and prompt mixed callback/pull access still works while a
+Transaction is alive. next_transaction/next_informational skip expired
+weak slots, and insertion drops expired head slots. The server's
+on_request callback path is also weak to avoid server-side retention.
+No application API method, native ABI or Net::QUIC source changed.
+
+The existing real-QUIC callback/pull loopback regression adds an
+assertion that the client callback notification is weak, while the
+server's mixed callback/pull identity assertion remains. Client/Server
+POD describes the contract. Re-run standalone HTTP3 tests and the
+upper same-connection 2048-request profiler against this new HTTP3
+commit before claiming memory growth resolved. Update upper integration
+CI pin only after verifying the standalone candidate build. No main
+merge, tag or release.
+
 ## Static payload-copy site audit for HTTP3 0.13 (2026-10-18)
 
 Added docs/PERFORMANCE-COPY-BOUNDARIES.md from the current native source

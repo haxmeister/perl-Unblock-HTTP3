@@ -2080,6 +2080,8 @@ is(
     refaddr($callback_server_tx),
     'server on_request receives the public Transaction',
 );
+ok($callback_server_tx,
+    'mixed server callback/pull delivery preserves a live Transaction');
 ok(
     $server_request_end_callback_count > 0,
     'server on_request_end runs without changing buffered receive mode',
@@ -2130,6 +2132,16 @@ is(
     1,
     'client on_complete runs once',
 );
+my $callback_pull_is_weak = 0;
+for my $slot (@{ $client_h3->{ready_transactions} }) {
+    if (defined($slot)
+        && refaddr($slot) == refaddr($callback_client_tx)) {
+        $callback_pull_is_weak = Scalar::Util::isweak($slot) ? 1 : 0;
+        last;
+    }
+}
+ok($callback_pull_is_weak,
+    'callback-delivered client Transaction is weak in optional pull queue');
 is(
     $callback_error_count,
     0,
