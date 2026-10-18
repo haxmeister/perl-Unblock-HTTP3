@@ -1,3 +1,13 @@
+## Static payload-copy site audit for HTTP3 0.13 (2026-10-18)
+
+Added docs/PERFORMANCE-COPY-BOUNDARIES.md from the current native source
+and published Net::QUIC 0.05. It separates explicit nghttp3 DATA-to-Perl
+newSVpvn, nghttp3 output vector-to-Perl sv_catpvn, and Net::QUIC native
+transmit memcpy from borrowed pointers and potential Perl COW scalar
+construction. Exact copy counts and allocation rates were NOT measured;
+the optional upper live profiler memory checkpoints are not substitutes.
+No production code, ABI, dependency or main branch changed.
+
 ## HTTP3 12/16 Reader stress resolved with bounded QUIC receive credit (2026-10-18)
 
 This SUPERSEDES the earlier handoff interpretation that HTTP3 0.13 needs a
