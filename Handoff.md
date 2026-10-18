@@ -1,3 +1,32 @@
+## Confirmed HTTP3 16-stream scheduling / tight MAX_DATA gap (2026-10-18)
+
+Upper integration CI 39158428479 at source
+7054b96f7207ab8f3f0b6a064c740c2765dd7f23 verified HTTP3 per-stream
+output scheduling with 12 and 16 simultaneous 1 MiB producers, independent
+32 KiB held Readers (2s and 3s holds), 8192-byte native producer budget,
+one authenticated connection and an additional fast response. With
+connection_window=33554432 BOTH 12 and 16 producer cases PASS with
+the SHA-256, native body retention, producer fair-resume, exactly-once
+terminal and sequential Reader credit assertions preserved.
+
+The same CI deliberately FAILS at the 12-producer test when only the
+connection receive window is tight (458752). Reader0 obtains 98184 bytes,
+others hold 32739 each, 12 H3 output streams are blocked, QUIC send
+buffer is empty and native retained body is ~49591. This is a reproducible
+aggregate QUIC credit/wakeup concern, not a native body-buffer limit.
+No HTTP3-specific ACK broadcast or timer poll workaround is approved.
+
+Unblock::HTTP upper's 32-inflight direct-versus-unified buffered-response
+smoke also PASS at 16 KiB responses; initial hosted CI wall ratio ~1.052
+over two very short rounds is descriptive, NOT a reliable speed estimate.
+Perl allocations and payload copies are still not directly measured.
+
+Potential generic Net::QUIC fix: a standalone 12-stream low-MAX_DATA
+reproducer should verify the peer connection-wide MAX_DATA credit update
+and targeted wakeup of short-accepted send_some waiters. Net::QUIC 0.05
+remains read-only without fresh, separate authorization. Do not merge,
+tag or release HTTP3 0.13 yet. No production code or main refs were
+changed by this documentation update.
 ## Resumed 12-producer HTTP3 stress: aggregate QUIC credit gap (2026-10-18)
 
 Do NOT treat HTTP3 0.13 as finished solely on the passing six-producer
