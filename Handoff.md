@@ -10,6 +10,37 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## Three-budget retained-byte observation (2026-10-17)
+
+The upper LinuxEvent integration now checks native per-stream
+retained streaming body bytes against the connection aggregate
+throughout live three-stream producer contention. No production
+engine changes beyond tested source
+96cf41e9378333fb4f7b48d89c8311c1dcf7cee7.
+
+Upper CI source 556d296392745b7ab16a31b7b213bcf62638aa6b,
+run 39098755460 PASSED: 552 distribution / 455 real TCP/QUIC
+checks, plus 64 at native send_buffer_limit 131072 and 58 at
+4194304. The normal live case uses 8192. No accounting
+mismatches in any of the three cases; all requests, byte counts,
+SHA-256 digests, staged readers, and once-only producer/terminal
+callbacks completed.
+
+Native producer retained peaks observed:
+8192 limit -> 13618 bytes; 131072 -> 173406 bytes;
+4194304 -> 3047511 bytes. Corresponding sampled QUIC
+send-retained peaks were 8192, 131072, 3061953.
+Native and QUIC counters measure distinct buffering surfaces,
+NOT process RSS or a hard output cap. A whole accepted write
+can overshoot its active stream's fair-share budget; the
+documented backpressure threshold remains advisory.
+Per-stream peaks are not simultaneous values.
+
+Next: tests for active producer join/cancel, native discard/ACK
+accounting at stream termination, process RSS and copies, and
+controlled direct-H3 versus unified benchmarks. Main,
+Net::QUIC, Uniform, release/tag/version unchanged.
+
 ## Fair-share native streamed send retention (2026-10-17 continuation)
 
 This slice addresses the outstanding HTTP3 aggregate-producer starvation
