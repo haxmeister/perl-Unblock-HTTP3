@@ -10,6 +10,46 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## Independent QUIC output-stream flow control (2026-10-17)
+
+The upper integration xt/linux-event-quic-multi-credit.t exposed a
+previously untested situation: three native streamed H3 responses use
+one QUIC connection, and all three pull-mode Readers withhold receive
+credit. The fast fourth response completed, but releasing the first
+slow Reader did not restart its producer. Original upper CI
+39095627619 failed after its 45s watchdog (distribution and all
+prior live tests passed). The original fixture is retained as a
+regression; do not weaken it or mistake that failure for verification.
+
+Root cause identified in Connection->_drain_output: when Net::QUIC
+Stream->send_some accepted fewer bytes than offered, nghttp3 retained
+the partially written stream as the next eligible output. The bridge
+exited the *entire* drain loop without telling nghttp3 that this
+stream was QUIC flow-control blocked. Other HTTP/3 streams could
+therefore be obstructed.
+
+Fix on this HTTP3 FEATURE BRANCH ONLY:
+- HTTP3.xs exposes internal native block_stream()/unblock_stream()
+  using nghttp3_conn_block_stream and nghttp3_conn_unblock_stream.
+  These are not public NativeABI changes.
+- Connection->_drain_output advances the accepted write offset,
+  blocks only that partially accepted stream in nghttp3, records its
+  id and continues scheduling other streams.
+- On next QUIC stream activity, _service_stream unblocks only the
+  recorded id; if QUIC still refuses bytes, it reblocks the stream.
+  Cleanup deletes per-stream bookkeeping. Other streams remain able
+  to progress, with the same accepted-byte contract and no replays.
+- No Net::QUIC, Uniform::HTTP, HTTP1/HTTP2, main, or version changes.
+
+Fix source commit 14eaaf2f94173650b830799a2f43fca0c77ab0a1
+(preceded by XS commit 2a88fd5f092526985a2fb093dfd9607a2422b951).
+Full HTTP3 matrix run 39095993708 PASSED on Linux Perl
+5.20/5.28/5.36/5.44. Interoperability run 39095993713 and
+unified live integration run 39096018997 were still in progress at
+this checkpoint. The unified workflow pins the exact fix source.
+Do not call the multi-stream regression verified until that
+run passes.
+
 ## H3 request stream credit continuation (2026-10-17)
 
 Starting feature refs: upper e540559ca43bce8b15fc8c71d148f82e863ca858;
