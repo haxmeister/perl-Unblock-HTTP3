@@ -10,6 +10,41 @@ perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed pub
 feature branches and coordinated CI on 2026-10-17. Publication is authorized.
 The agreed contract is in perl-Unblock-HTTP/docs/ENGINE-CONTRACTS.md.
 
+## QUIC shared-capacity wakeup resolved and tested (2026-10-18)
+
+RESOLVED: upper six-stream test stalled not from exhausted flow credit
+but from missing wakeups for QUIC Stream->send_some calls that accepted
+only a prefix while the connection-wide send queue was full. Later ACKs
+on OTHER streams freed memory, but blocked writers had no own ACK event.
+Temporary internal credit probe proved at stall: available MAX_DATA
+261956, per-stream MAX_STREAM_DATA ~32 KiB, unsent TX=0, buffered TX=0.
+No HTTP3 scheduler broadcast is appropriate. Net::QUIC now tracks only
+short-write capacity waiters and wakes those Stream IDs through its
+existing coalesced on_stream_activity contract when sibling ACK returns
+shared queue space. This is generic standalone QUIC behavior.
+
+Net::QUIC finalized implementation 4d3a45aa2d3efb27523c6733c71d31cf527130a8,
+with debug-only private credit API removed. Full 15-job Linux Perl
+5.20-5.44/macOS/Windows CI 39147484627 PASS. H3 feature scripts pin
+this commit exactly in ccb7759509b76515577fd6270eebbb83d7df0714;
+H3 4-job matrix 39147558339 PASS, its previous interoperability and
+Linux::Event smoke succeeded. The H3 output bridge alone opts into
+limit_to_credit => 1; public H3 API and versions unchanged.
+
+Unified Unblock::HTTP genuine six-slow-producer real-socket regression
+PASSED first at upper run 39147266161 (686 live checks in 13 files),
+then at cleaned source run 39147574565 after removing temporary
+Net::QUIC/XTEST credit probes (also 552 dist, 64+58 buffer-budget and
+all profiler smoke checks PASS). The test requires six independent 1 MiB
+producers and one fast request, all six initial Reader credit holds,
+SHA-256 payload integrity, exactly once terminal completion and native
+retention / fairness invariants. No cancellation or weakened constraints.
+
+No main branch changes, merges, releases, tags, or version bumps.
+Release preparation in a separate authorized step must first coordinate a
+new published Net::QUIC version and H3 minimum dependency requirement;
+feature CI source pins are not a valid released dependency contract.
+
 ## Opt-in standalone NetQUIC transmit-credit admission (2026-10-18)
 
 User authorized a separate Net::QUIC feature branch but requires Net::QUIC to
