@@ -3849,6 +3849,39 @@ add_write_offset(self, stream_id, amount)
         }
 
 void
+block_stream(self, stream_id)
+    SV *self
+    IV stream_id
+    PREINIT:
+        unblock_http3_native_conn *native;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+
+        nghttp3_conn_block_stream(
+            native->conn,
+            (int64_t)stream_id
+        );
+
+void
+unblock_stream(self, stream_id)
+    SV *self
+    IV stream_id
+    PREINIT:
+        unblock_http3_native_conn *native;
+        int rv;
+    CODE:
+        native = unblock_http3_conn_from_sv(self);
+
+        rv = nghttp3_conn_unblock_stream(
+            native->conn,
+            (int64_t)stream_id
+        );
+
+        if (rv != 0) {
+            unblock_http3_fail("could not unblock HTTP/3 stream", rv);
+        }
+
+void
 update_ack_offset(self, stream_id, offset)
     SV *self
     IV stream_id
