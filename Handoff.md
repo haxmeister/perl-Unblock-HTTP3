@@ -1,3 +1,44 @@
+## HTTP3 12/16 Reader stress resolved with bounded QUIC receive credit (2026-10-18)
+
+This SUPERSEDES the earlier handoff interpretation that HTTP3 0.13 needs a
+new Net::QUIC release to resolve the aggregate 12-Reader stall.
+The original 6-Reader test was valid and remains unchanged.
+The 12-Reader exploratory fixture advertised only 458752 bytes of
+connection-wide QUIC receive credit while eleven siblings each withheld
+about 32739 bytes. The remaining consuming Reader could not release
+enough bytes to trigger ngtcp2's coalesced MAX_DATA update. The sender had
+zero connection credit, 12 registered send-capacity waiters, usable
+per-stream credit and no pending QUIC transmit data. This is a
+receive-credit budgeting issue, NOT missing HTTP3 producer fairness.
+
+Upper six/12/16 workload regression now sizes QUIC aggregate credit with
+headroom while retaining 32768-byte individual stream windows, the
+8192-byte advisory native producer limit, exactly-once callbacks,
+per-stream retention accounting, SHA-256 and staged Reader release:
+six slow 1-MiB streams at 256 KiB, twelve at 512 KiB, sixteen at 1 MiB.
+Additional 32 MiB isolation runs still pass. Independent response
+buffering profiles run at up to 32 in-flight. The temporary credit-debug
+XSUB was removed from Net::QUIC.
+
+FULL UPPER REAL INTEGRATION on RELEASED CPAN Net::QUIC 0.05: GitHub Actions
+39161358835 PASS (all distribution, live TCP/H3 QUIC, extra budget and
+profiling smoke stages). Feature-pinned standalone Net::QUIC workflow
+39161358785 also PASS. Thus UNRELEASED HTTP3 0.13 requires only published
+Net::QUIC >=0.05; no second transport release is a prerequisite.
+
+A separate legitimate standalone Net::QUIC generic activity-wakeup issue
+was reproduced and fixed on feature/connection-max-data-wakeup with
+HTTP-free t/38. Its clean feature source
+1606308eeeaf29f2601fa166046703a4b4ba9491 passed 15/15 CI
+39161007332. Net::QUIC main 0.05 remains untouched, and that optional
+improvement is not required by the fixed upper H3 stress fixture.
+
+No HTTP3 production source, public ABI, main ref, tag, version or CPAN
+release was changed in this investigation. 0.13 remains release-PREPARED,
+not released. Other performance work (allocation/copy measurement,
+long-duration soak and carefully controlled high-concurrency comparison)
+is still open. Do not merge or release without explicit authorization.
+
 ## Confirmed HTTP3 16-stream scheduling / tight MAX_DATA gap (2026-10-18)
 
 Upper integration CI 39158428479 at source
