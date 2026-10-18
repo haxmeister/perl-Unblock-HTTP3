@@ -1,3 +1,37 @@
+## Bounded callback notification queue length (2026-10-18)
+
+The upper unified Client ownership cycle was fixed at upper commit
+9f47d2b4ea8370f5c215261cbe9474bebaae2801. Published Net::QUIC 0.05
+full real-socket upper CI 39171144266 PASS: 2048 measured requests after
+128 warmup, two rounds, with unified private memory 7332 -> 7520 KiB
+(round 1) and 7420 -> 7524 KiB (round 2), versus roughly 95 MiB
+at end before the upper fix. Direct private memory also stays bounded.
+Both modes' active transaction counts remain near the concurrency limit.
+
+One residual diagnostic showed unified ready_transactions ARRAY LENGTH
+still equal to 2176, despite bounded private/PSS/RSS memory. A retained
+old weak slot at the head can prevent head-only pruning even though all
+later weak callback notifications have expired. It did NOT mean 2176
+live Transaction objects, but stale queue slots were still accumulating.
+
+This change adds a 64-callback-insertion cadence for compacting expired
+weak slots anywhere within ready_transactions and ready_informational,
+preserving ordering, intentionally live callback-owned references, and
+strong pull-only entries. Existing head pruning remains. The new
+t/27 regression holds a live weak head while 512 later weak entries
+expire, with a strongly queued pull entry behind the head; it checks
+bounded stale slots and FIFO identity for transactions and informational
+notifications. This changes no public API, version, native ABI, or
+Net::QUIC dependency. The compaction is not in the per-byte hot path.
+Large intentionally unconsumed pull-only queues remain strongly held by
+contract.
+
+REVERIFY after publishing this HTTP3 feature commit: full four-version
+standalone matrix, real-QUIC upper 2048-request profiler (update the
+upper workflow pin first), and remaining interop implications. Prior
+interop 39165482280 PASS uses identical production engine files except
+for this queue-only change. Do not merge, tag, release, or touch main.
+
 ## Independent callback/pull queue lifetime regression (2026-10-18)
 
 t/27-callback-queue-retention.t exercises internal notification queues

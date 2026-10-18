@@ -67,4 +67,41 @@ undef $pull_info;
 is(refaddr($conn->next_informational), $info_id,
     'pull-only informational notification stays strongly available');
 
+
+# A live old callback Transaction can block head-only pruning forever.
+# Later callback entries must be compacted even if that head stays alive.
+my $held_head = bless {}, 'Local::Transaction';
+my $held_head_id = refaddr($held_head);
+$conn->_enqueue_delivery('ready_transactions', $held_head, 1);
+my $pull_behind = bless {}, 'Local::Transaction';
+my $pull_behind_id = refaddr($pull_behind);
+$conn->_enqueue_delivery('ready_transactions', $pull_behind, 0);
+undef $pull_behind;
+for (1 .. 512) {
+    my $temporary = bless {}, 'Local::Transaction';
+    $conn->_enqueue_delivery('ready_transactions', $temporary, 1);
+}
+cmp_ok(scalar @{ $conn->{ready_transactions} }, '<=', 66,
+    'live old callback head does not trap unbounded expired weak entries');
+is(refaddr($conn->next_transaction), $held_head_id,
+    'compaction preserves oldest live callback notification');
+is(refaddr($conn->next_transaction), $pull_behind_id,
+    'compaction preserves strongly queued pull-only notification and FIFO');
+is($conn->next_transaction, undef,
+    'all expired callback notifications behind live head are skipped');
+
+my $held_info = bless {}, 'Local::Transaction';
+my $held_info_id = refaddr($held_info);
+$conn->_enqueue_delivery('ready_informational', $held_info, 1);
+for (1 .. 512) {
+    my $temporary = bless {}, 'Local::Transaction';
+    $conn->_enqueue_delivery('ready_informational', $temporary, 1);
+}
+cmp_ok(scalar @{ $conn->{ready_informational} }, '<=', 65,
+    'informational callback queue also compacts expired non-head entries');
+is(refaddr($conn->next_informational), $held_info_id,
+    'live informational notification survives compaction');
+is($conn->next_informational, undef,
+    'expired informational notifications are skipped after compaction');
+
 done_testing;

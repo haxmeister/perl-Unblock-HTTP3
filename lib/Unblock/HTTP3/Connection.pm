@@ -1754,7 +1754,17 @@ sub _enqueue_delivery {
     my $queue = $self->{$queue_name};
     shift @$queue while @$queue && !defined $queue->[0];
     push @$queue, $transaction;
-    weaken($queue->[-1]) if $callback_owned;
+    if ($callback_owned) {
+        weaken($queue->[-1]);
+        # A live old entry can keep the head from advancing while expired
+        # weak notifications accumulate behind it. Periodic compaction
+        # bounds that stale tail without scanning on every request. Strong
+        # pull-only entries must remain queued until explicitly retrieved.
+        if (++$self->{weak_delivery_insertions}{$queue_name} >= 64) {
+            @$queue = grep { defined $_ } @$queue;
+            $self->{weak_delivery_insertions}{$queue_name} = 0;
+        }
+    }
     return;
 }
 
