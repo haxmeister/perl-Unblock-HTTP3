@@ -1,3 +1,22 @@
+## Follow-up release audit: strict dependency version test flaw (2026-10-18)
+
+The project paused before any merge or publication to re-examine unfinished
+HTTP3 performance/stress tasks from prior handoffs. Eight distribution tests
+still required EXACT Net::QUIC 0.05 despite Makefile.PL declaring 0.05 as a
+minimum. This would make the HTTP3 CPAN installation suite fail if a later
+compatible Net::QUIC version were installed. Relaxed only these assertions to
+require Net::QUIC >= 0.05; CI workflows continue installing/verifying the
+actual released Net::QUIC 0.05 for candidate smoke and interoperability.
+No engine semantics or other libraries were changed. Re-run full CI before
+calling this revision verified.
+
+The six-producer contention and source-pin deadlock regression are resolved,
+but sustained very-slow-reader workloads, higher-concurrency reliability and
+allocation/copy accounting against direct engine performance remain deferred
+in the unified Handoff and docs/PERFORMANCE.md. Profiling tools exist, not a
+completed memory/copy budget or stress sign-off. Do not infer all planned
+HTTP3 performance work is finished from the released-dependency smoke tests.
+
 ## HTTP3 0.13 release verification with released Net::QUIC 0.05 (2026-10-18)
 
 Feature candidate 1bed34bc19213df6066fc72668cf0b9930de0d51:
