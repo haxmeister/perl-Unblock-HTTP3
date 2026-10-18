@@ -1,3 +1,18 @@
+## Extra moved-weak-slot lifetime regression passes (2026-10-18)
+
+t/27-callback-queue-retention.t was extended in feature commit
+27eae74797044c3be10137904b6d49388afa9f80, without production
+changes, to test compaction moving a *still-live* callback-owned weak
+slot across an expired slot. It verifies the moved notification remains
+weak, a simultaneously moved pull-only entry remains strong, all three
+survivors retain FIFO identity, and expired slots disappear. The full
+standalone 4-version Linux Perl test matrix 39172771475 PASS (Perl
+5.20, 5.28, 5.36, 5.44). The HTTP3 production version used in the
+green upper real-QUIC profile remains source commit
+5e0d496bb52331670edc9850d6fa417d984d0e67; only t/27 and
+documentation have been added afterward. No release/merge/tag/version
+change or Net::QUIC modification.
+
 ## HTTP3 final weak-notification compaction verified against released Net::QUIC 0.05 (2026-10-18)
 
 HTTP3 feature commit 5e0d496bb52331670edc9850d6fa417d984d0e67
