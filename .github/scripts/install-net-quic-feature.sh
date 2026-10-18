@@ -2,7 +2,7 @@
 # Feature-branch-only CI pin. Do not put this experimental dependency in a
 # CPAN release until coordinated versioning/release has been approved.
 set -eu
-revision=be0ceecbaa88a6d8100459642a018b8eefba8e56
+revision=4d3a45aa2d3efb27523c6733c71d31cf527130a8
 directory="$(mktemp -d)"
 trap 'rm -rf "$directory"' EXIT
 git -C "$directory" init -q
