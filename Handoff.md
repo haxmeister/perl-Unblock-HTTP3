@@ -36,14 +36,24 @@ joined after cancellation, and an independent fast response.
 It tests the retained-body counters, sha256, native
 on_drain/accepted-write contract, no duplicate terminal
 notification, cancellation idempotency, and buffer isolation.
-Upper pinned CI integration run 39133882442 was in progress
-at this checkpoint. Do not mark the live scenario verified
-until CI passes, and correct any newly exposed defects only
-within approved feature branches.
+Upper pinned CI integration run 39133882442 PASSED:
+552 distribution checks, 11 real TCP/QUIC files / 485 checks,
+64 more checks at the 128 KiB native budget, 58 more at 4 MiB.
+The real H3 join/cancel scenario finishes all paths and
+receives the expected server/client cancelled terminal state;
+repeated cancel is idempotent, native streaming retained body
+storage is released, and its per-stream/aggregate counters
+reconcile. Deferred producer write(false)/on_drain and SHA256
+checks all pass. Upper CI 39134487091 later repeats
+the same verified integration fixture successfully while adding
+a smoke run for a direct vs unified HTTP3 client benchmark.
 
-Next: true dynamic join without prior cancellation, controlled
-RSS/allocation and direct-engine comparative benchmarks. No
-main updates, release, merge, tag or version bumps.
+Next: active producer join *without* cancelling a sibling,
+controlled RSS/allocation and direct-engine comparative
+benchmarks with repeated controlled trials and realistic
+body sizes. This is NOT proof of a hard memory cap or
+a throughput improvement. No main updates, release, merge,
+tag, version bump, Net::QUIC or Uniform changes.
 
 ## Three-budget retained-byte observation (2026-10-17)
 
