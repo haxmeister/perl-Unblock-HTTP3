@@ -1,3 +1,91 @@
+# MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP3 0.13
+Updated: 2026-10-21
+Repository: https://github.com/haxmeister/perl-Unblock-HTTP3
+Current branch: main
+Integrated development branch: feature/unified-receive-lifecycle
+Fast-forward merge checkpoint: 6687bcef0efd11991ac609f7dc7f7fa487153d28
+
+## Instructions for the next HTTP3-only conversation
+
+The maintainer authorized merging the existing coordinated HTTP3 feature
+branch to MAIN, and it HAS been fast-forward merged. This is the standalone
+Unblock::HTTP3 **0.13 release candidate**. Latest previously published
+GitHub version was 0.12. All explicit indexed module versions in this
+tree are already 0.13, including HTTP3 NativeABI (important after the
+historical PAUSE/NativeABI version-0 indexing incident). Do not
+needlessly bump again. No 0.13 GitHub tag/release or CPAN upload has
+been performed. Earlier "do not merge", "feature branch only", and
+"not release preparation" notes below were written during development
+and no longer describe the current MAIN state.
+
+## Independently useful lower-engine contracts
+
+Unblock::HTTP3 is an HTTP/3 engine that remains useful without the upper
+Unblock::HTTP or Linux::Event. It integrates with Net::QUIC through
+event-loop-neutral datagram/QUIC and timeout contracts. Net::QUIC itself
+MUST remain independently usable; do not add upper-layer or Linux::Event
+dependencies. Keep direct Client, Server, Transaction and Connection
+interfaces available, backed by the original nghttp3/QUIC engines and
+Uniform::HTTP objects. The coordinated engine features include:
+- Bounded buffered or streamed HTTP3 body receive with per-request
+  on_data and on_finish and terminal/lifecycle parity with H1/H2.
+- Response streaming via the existing Transaction write/end/on_drain,
+  request stream-credit availability notifications, cancellation/error
+  isolation, peer SETTINGS and Extended CONNECT support.
+- A transport-neutral native fast path while preserving publicly
+  installed NativeABI headers and correct VERSION metadata.
+- Real-QUIC memory-retention fixes: operation/notification registries,
+  weak callbacks, moved weak-slot compaction and FIFO identity tests.
+  Keep weak slots WEAK when compacted; pull-only queue entries stay strong.
+- Stable live HTTP3 data paths under multiple concurrent request bodies
+  and bounded aggregate connection/stream receive windows.
+- No built-in WebSocket framing: the optional unified Unblock::HTTP
+  layer handles HTTP3 Extended CONNECT and WebSocket sessions.
+
+## Verified checkpoints and dependency boundaries
+
+Production fixes and real-QUIC test source 5e0d496bb52331670edc9850d6fa417d984d0e67
+passed standalone CI run 39172069382 and independent quic-go HTTP3
+interoperability run 39172069428. One later test-only commit
+27eae74797044c3be10137904b6d49388afa9f80 extended the weak
+notification compaction test and passed complete standalone Perl
+5.20/5.28/5.36/5.44 matrix:
+https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/39172771475
+The integrated HEAD 6687bcef... differs after that passing run only
+in Handoff.md. The upper Unblock::HTTP H3 Client/Server/WebSocket
+real localhost QUIC/TLS tests and full integration CI were also
+verified in the coordinated upper feature before merging.
+
+The current Makefile.PL minimum is Net::QUIC >= 0.05 and
+Uniform::HTTP >= 0.06. The Net::QUIC 0.06 minor release candidate,
+now on Net::QUIC MAIN, adds a standalone MAX_DATA producer wakeup
+fix. HTTP3 0.13 was verified with **published Net::QUIC 0.05** AND
+the optional 0.06 feature path; do not silently require 0.06 unless
+a real versioned dependency justifies it. This preserves backward
+compatibility with an already-published standalone QUIC runtime.
+The previous 12/16-producer receive-window stall was fixed with
+sufficient aggregate receive-window headroom, NOT by the MAX_DATA
+wakeup alone. See historical logs below; avoid repeating that
+profiler campaign.
+
+## Next actions in the HTTP3-specific chat
+
+Start from MAIN. Audit version 0.13, Changes, Makefile.PL, all literal
+module VERSION values and NativeABI index metadata, MANIFEST, installed
+public header, POD, standalone examples, build flags and a clean
+disttest from the release candidate tarball. Run/confirm current
+standalone and independent interop CI on the source package. Verify
+the intended Net::QUIC baseline and correctly express the required
+versions in generated metadata; do not regress 0.05 compatibility
+without evidence. Complete focused release readiness, obtain approval
+for GitHub release/tag and CPAN upload, then validate PAUSE indexes
+every package at the correct version. No new performance campaign or
+framework-specific adapter work is needed to publish this engine.
+HTTP3 0.13 must be available before upper Unblock::HTTP 0.02.
+
+## Historical engineering record (kept for deep debugging; heading above
+## supersedes old feature-branch-only restrictions)
+
 ## Extra moved-weak-slot lifetime regression passes (2026-10-18)
 
 t/27-callback-queue-retention.t was extended in feature commit
