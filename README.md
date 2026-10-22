@@ -1,9 +1,5 @@
 # Unblock::HTTP3
 
-Development branch: `feature/unified-receive-lifecycle` adds bounded receive
-buffers, transaction `on_data` / `on_finish` callbacks, and Net::QUIC 0.05
-credit-aware output. These changes are not yet released. See `Handoff.md` for validation and continuation instructions.
-
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP3.svg)](https://metacpan.org/dist/Unblock-HTTP3)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP3.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP3)
 [![CI](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP3/actions/workflows/test.yml)
@@ -49,10 +45,15 @@ Net::QUIC       0.05+
 Uniform::HTTP   0.06+
 ```
 
-Version 0.13 prepares bounded buffered reception and per-transaction
-on_data/on_finish lifecycle callbacks for the unified Unblock::HTTP layer.
-It also uses Net::QUIC 0.05 for credit-aware bounded QUIC output and targeted
-shared-capacity wakeups. The HTTP3 native consumer ABI remains version 1.
+Version 0.13 adds bounded buffered reception and per-transaction
+`on_data` / `on_finish` lifecycle callbacks for the unified Unblock::HTTP
+layer while preserving standalone Client and Server use. It fixes retention
+of completed callback-delivered Transactions by keeping callback
+notifications weak, compacting expired weak slots without changing their
+ownership, and retaining strong references for pull-only notifications.
+Net::QUIC 0.05 remains the minimum dependency for credit-limited QUIC
+output and targeted shared-capacity wakeups. The native consumer ABI
+remains version 1.
 
 Version 0.12 fixed NativeABI version metadata for PAUSE indexing.
 
