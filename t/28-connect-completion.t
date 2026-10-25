@@ -231,14 +231,25 @@ ok(run_until(sub {
 
 my $server_writer = $server_tx->response_body;
 isa_ok($server_writer, ['Unblock::HTTP3::Body::Stream']);
-$server_writer->complete('server-completed-first');
+$server_writer->write('server-response');
+$server_writer->complete;
 
-ok(run_until(sub {
+my $response_completed = run_until(sub {
     my $response = $client_tx->response;
     my $reader = $client_tx->_incoming_body_reader('response');
     return $response && $response->is_complete
         && $reader && $reader->is_complete;
-}), 'response and incoming reader complete before Client request FIN');
+});
+if (!$response_completed) {
+    my $res = $client_tx->response;
+    my $reader = $client_tx->_incoming_body_reader('response');
+    diag("pre-FIN state: tx=" . $client_tx->state
+        . " response=" . ($res ? $res->is_complete : 'none')
+        . " reader=" . ($reader ? $reader->is_complete : 'none')
+        . " server=" . $server_tx->state);
+}
+ok($response_completed,
+    'response and incoming reader complete before Client request FIN');
 
 ok(!$client_writer->is_complete,
     'outgoing Client request writer remains open');
