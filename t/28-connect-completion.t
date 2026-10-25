@@ -215,6 +215,7 @@ my $request = Uniform::HTTP::Request->new(
 my $client_tx = $client_h3->request(
     $request,
     stream_body => 1,
+    receive_body => 'stream',
     on_complete => sub { ++$client_completes },
     on_finish => sub { ++$client_finishes },
 );
