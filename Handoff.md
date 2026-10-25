@@ -1,3 +1,19 @@
+# MAIN RELEASE-PREPARED: perl-Unblock-HTTP3 0.14 - 2026-10-25
+
+The maintainer explicitly authorized moving the completed, tested
+feature branch to main with its new distribution version.
+Main was fast-forward merged to production/test source 8fa64811ef5d2f8b30708cf0f2e15d9e946d6bee.
+All tagged/CPAN versions remain as previously published:
+**NO new tag, GitHub release, PAUSE/CPAN upload or public publication**.
+The candidate is on main, not yet publicly released.
+Test evidence:
+- https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/40236492596
+- https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/40236492620
+Release notes are in docs/RELEASE-0.14.md. This main handoff
+supersedes historical "main must remain untouched" restrictions
+below; it does not authorize public publication without an explicit
+subsequent request. Native protocol ABI numbers are unchanged.
+
 # RELEASE PREPARATION - Unblock::HTTP3 0.14 (2026-10-25)
 
 Maintainer authorized merge of feature/connect-completion-recheck
