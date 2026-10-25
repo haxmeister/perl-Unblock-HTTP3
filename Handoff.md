@@ -1,3 +1,56 @@
+# ACTIVE FEATURE WORK — HTTP3 CONNECT completion recheck (2026-10-25)
+
+Branch: feature/connect-completion-recheck
+Unmodified main baseline: aa810d0b80dd4b3f94850b8ca95a4b5e6d7737a7.
+Verified implementation + real-QUIC regression:
+b0585f6083c91a7bdfea0ddbccfefea76ab92362
+CI: https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/40152896247
+PASS in all four standalone Perl lanes 5.20, 5.28, 5.36, 5.44.
+No main change, merge, tag, version bump, release, or dependent source edits.
+
+Problem: Linux::Event::HTTP real H3 WebSocket Extended CONNECT case
+received the full response and remote stream Close but remained active.
+At t+1 second: incoming response/reader complete, outbound request
+Body::Stream complete, native output_finished, stream closed_seen,
+callback_depth 0; Transaction on_finish never occurred before its
+5-second timeout. The generic H3 Client completion path requires
+that for CONNECT the outbound request body also be complete.
+
+Cause: Body::Stream->complete() used _write_body(final=1) BEFORE
+setting its own complete flag. When the final write flushed synchronously,
+Connection->_maybe_complete_transaction() observed an incomplete writer
+and returned; no later network event was guaranteed to repeat the check.
+
+Fix: After the Body::Stream complete flag is committed, call the new
+Transaction->_outgoing_body_complete() internal method. It asks the
+existing owning Connection to recheck _maybe_complete_transaction().
+Terminal state and callback-depth guards remain in Connection; no
+new looping/retry/polling or Linux framework coupling, no new dependency.
+The method is triggered once per body finalization, not per chunk.
+
+Test: t/28-connect-completion.t uses real loopback Net::QUIC TLS. A
+server sends streaming response DATA and FIN before its Client closes
+the outgoing CONNECT request. After consuming the incoming streaming
+response, Client request writer->complete must SYNCHRONOUSLY complete
+the Transaction and call on_complete/on_finish exactly once, without
+additional driver polling. Server finishes normally after receiving FIN.
+This test and all existing 28 other standalone tests PASS across the
+four CI lanes above.
+
+Downstream required test:
+haxmeister/perl-Linux-Event-HTTP feature/unblock-http-rebuild
+t/rebuild/102-websocket-multiplex.t, must pass with the feature source
+installed, in both native and Perl input modes. Root CI is pinning the
+exact tested commit b0585f6. Verify CI before claiming Stage E green.
+Also recheck all existing Stage D real QUIC/TLS tests. H1/2/Net::QUIC
+remain read-only.
+
+Permission: user expressly authorized development on a new HTTP3
+feature branch to fix this bug. Main still needs permission. Do not
+merge, tag, release or bump versions. This note supersedes historical
+main release instructions below until a separate release conversation.
+
+---
 # MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP3 0.13
 Updated: 2026-10-21
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP3
