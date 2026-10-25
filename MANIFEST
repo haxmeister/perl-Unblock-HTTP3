@@ -58,3 +58,4 @@ t/24-receive-lifecycle.t
 t/25-terminal-callbacks.t
 t/26-request-capacity.t
 t/27-callback-queue-retention.t
+t/28-connect-completion.t

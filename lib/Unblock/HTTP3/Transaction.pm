@@ -911,6 +911,18 @@ sub _consume_received_body {
     return;
 }
 
+# Complete may send FIN and drive native callbacks before the outbound
+# Body::Stream marks itself finished. Recheck only once that flag is set.
+# The Connection retains authority over terminal and callback-depth guards.
+sub _outgoing_body_complete {
+    my ($self, $kind) = @_;
+    return if $self->is_terminal;
+
+    my $connection = $self->{connection} or return;
+    $connection->_maybe_complete_transaction($self->{stream_id});
+    return;
+}
+
 sub _received_body_complete {
     my ($self, $kind) = @_;
 
