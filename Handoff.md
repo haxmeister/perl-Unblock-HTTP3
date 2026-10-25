@@ -37,6 +37,18 @@ additional driver polling. Server finishes normally after receiving FIN.
 This test and all existing 28 other standalone tests PASS across the
 four CI lanes above.
 
+Downstream verification COMPLETED: root Linux::Event::HTTP
+feature/unblock-http-rebuild required CI 40152960105 PASS all seven
+Perl jobs, including real Net::QUIC and H3/HTTP2 WebSocket sibling
+multiplexing, with t/rebuild/102 passing in BOTH native and Perl
+input modes. Existing H3 Stage D tests 70/80/90/95/96/97/98/99
+also PASS, plus H1 WebSocket TLS and generic Upgrade/CONNECT tests.
+Root exact implementation checkpoint 673584eed55fff7553190c5edc8c52b5c463aa03,
+documentation checkpoint 0ca2f480ddfd9d97e7adff13f310c36de0948df4.
+The H3 Close regression is no longer a release blocker for the
+coordinated feature branches; Stage E generic H2/H3 non-WebSocket
+handoff is still pending, as are root throughput/h2spec gates.
+
 Downstream required test:
 haxmeister/perl-Linux-Event-HTTP feature/unblock-http-rebuild
 t/rebuild/102-websocket-multiplex.t, must pass with the feature source
