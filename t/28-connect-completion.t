@@ -234,12 +234,20 @@ isa_ok($server_writer, ['Unblock::HTTP3::Body::Stream']);
 $server_writer->write('server-response');
 $server_writer->complete;
 
+my $received_response = '';
 my $response_completed = run_until(sub {
     my $response = $client_tx->response;
     my $reader = $client_tx->_incoming_body_reader('response');
+    if ($reader) {
+        while (defined(my $bytes = $reader->next_chunk)) {
+            $received_response .= $bytes;
+        }
+    }
     return $response && $response->is_complete
         && $reader && $reader->is_complete;
 });
+is($received_response, 'server-response',
+    'incoming streaming response body consumed before local FIN');
 if (!$response_completed) {
     my $res = $client_tx->response;
     my $reader = $client_tx->_incoming_body_reader('response');
