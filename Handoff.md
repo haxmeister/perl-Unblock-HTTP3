@@ -1,3 +1,15 @@
+# RELEASE PREPARATION - Unblock::HTTP3 0.14 (2026-10-25)
+
+Maintainer authorized merge of feature/connect-completion-recheck
+to main, a complete version bump and release preparation.
+No tag, GitHub release or CPAN upload authorized.
+All 15 Perl modules have version 0.14 and t/23-pause-indexing.t,
+t/00-load.t and release tarball CI paths were updated.
+HTTP/3 native consumer ABI stays version 1.
+See docs/RELEASE-0.14.md, and verify standalone + real QUIC/TLS
+tests, distcheck, disttest, metadata and installed native header
+before the main fast-forward merge.
+
 # ACTIVE FEATURE WORK — HTTP3 CONNECT completion recheck (2026-10-25)
 
 Branch: feature/connect-completion-recheck

@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP3
 ```
 
-Unblock::HTTP3 0.13 requires:
+Unblock::HTTP3 0.14 release candidate requires:
 
 ```text
 Perl            5.20+
@@ -45,7 +45,10 @@ Net::QUIC       0.05+
 Uniform::HTTP   0.06+
 ```
 
-Version 0.13 adds bounded buffered reception and per-transaction
+Version 0.14 fixes CONNECT completion when an outgoing request body's
+final write is accepted synchronously, without requiring a subsequent
+QUIC event to deliver terminal callbacks. The public API and native ABI
+are unchanged. Version 0.13 added bounded buffered reception and per-transaction
 `on_data` / `on_finish` lifecycle callbacks for the unified Unblock::HTTP
 layer while preserving standalone Client and Server use. It fixes retention
 of completed callback-delivered Transactions by keeping callback
