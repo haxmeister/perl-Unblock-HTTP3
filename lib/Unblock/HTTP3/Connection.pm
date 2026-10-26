@@ -4816,8 +4816,10 @@ Useful request options include:
     on_informational
     on_response
     on_body
+    on_data
     on_complete
     on_error
+    on_finish
     on_drain
 
 C<stream_body =E<gt> 1> enables the common C<write()> and C<end()> Transaction

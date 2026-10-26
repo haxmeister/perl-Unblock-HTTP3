@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP3
 
-0.14  2026-10-25 (release candidate; not yet published)
+0.14  2026-10-25
     - Recheck HTTP/3 CONNECT Transaction completion after an outgoing
       Body::Stream is marked complete, including when its final output
       flushes synchronously during the writer's complete() call.

@@ -1,39 +1,29 @@
-# Unblock::HTTP3 0.14 - release preparation
+# Unblock::HTTP3 0.14
 
-**Status: release candidate only**. The maintainer authorized merging the
-complete `feature/connect-completion-recheck` changes to main and
-bumping the distribution to 0.14. Tagging, publishing a GitHub release
-and uploading to CPAN remain separate steps requiring explicit approval.
+This maintenance release fixes HTTP/3 CONNECT transaction completion when
+the final outgoing body write finishes synchronously.
 
-## Changes
+## What changed
 
-An HTTP/3 CONNECT response could finish, with the incoming reader,
-outgoing writer and native stream all completed, yet the Transaction
-remained active because the final Body::Stream write flushed before
-the writer's `complete` flag was set.
-
-After marking the writer complete, the engine now rechecks the ordinary
-Transaction completion conditions. This preserves exactly-once
-terminal callbacks and avoids reliance on another QUIC/network event.
-The fix is event-loop-neutral. See `t/28-connect-completion.t`.
+- Recheck Transaction completion after the outgoing Body::Stream is marked
+  complete, even when its final write flushes immediately.
+- Ensure completed CONNECT exchanges deliver on_complete and on_finish
+  exactly once without requiring another QUIC/network event.
+- Preserve stream ownership, callback ordering, and the existing HTTP/3
+  application and transport APIs.
+- Add a real UDP/QUIC/TLS CONNECT completion regression test.
 
 ## Compatibility
 
-- All 15 Perl modules use the statically parseable version **0.14**.
-- Native HTTP/3 consumer ABI remains at version **1**.
-- Minimum Perl 5.20, Alien::nghttp3 >= 0.01,
-  Net::QUIC >= 0.05 and Uniform::HTTP >= 0.06.
-- No public API additions and no Linux::Event-specific code.
-- No Net::QUIC or sibling HTTP engine modifications.
+- Perl 5.20 or newer.
+- Alien::nghttp3 0.01, Net::QUIC 0.05, Uniform::HTTP 0.06 or newer.
+- Native HTTP/3 consumer ABI remains version 1.
+- No public API changes or framework-specific dependencies.
 
-## Release checks
+## Verification
 
-- Test matrix: Perl 5.20, 5.28, 5.36 and 5.44.
-- Real QUIC/TLS CONNECT regression and existing HTTP/3 loopback suite.
-- `make distcheck`, `make disttest`, `t/23-pause-indexing.t`.
-- Generated `META.json` provides must index all public modules at 0.14.
-- Installed native header must be accessible from built source archive.
-- `.github/workflows/test.yml` archive paths must name 0.14.
-
-Do not publish until required workflows are green. This document
-does not represent a completed CPAN upload or GitHub release.
+The 0.14 release candidate passed standalone tests on Perl 5.20, 5.28,
+5.36, and 5.44, including the real QUIC/TLS CONNECT regression.
+Distribution and PAUSE-indexing checks, installed native-header tests,
+independent HTTP/3 interoperability, and Linux::Event smoke tests also
+passed.
