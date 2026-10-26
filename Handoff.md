@@ -1,3 +1,40 @@
+# FINAL MAIN 0.14 DOCUMENTATION AND PACKAGING AUDIT - 2026-10-25
+
+The maintainer requested the same complete release documentation review used
+for Unblock::HTTP1 and Unblock::HTTP2. Focused source commit:
+887493ca308fc5bba84df1f3413a4d7808087333.
+The change was committed directly to main as requested. It fixes missing
+Client and Connection POD on_data/on_finish option references, simplifies
+the README release introduction, documents Perl 5.36 requirements for optional
+Linux::Event examples, replaces preparation instructions with concise public
+0.14 release notes, and resolves conflicting MANIFEST.SKIP treatment of the
+current release notes. Application API, Integration POD, examples, architecture,
+RFC compliance and native ABI guides were reviewed; an extra cookbook would
+duplicate the already concise docs/APPLICATION-API.md.
+
+The 87 tracked files are accounted for by MANIFEST (62 entries) and
+MANIFEST.SKIP with no missing/stale items or included/skipped overlaps.
+The 15 Perl module versions remain 0.14. META provides retains 12 public
+packages and excludes 3 private implementation packages. Native ABI remains
+version 1. No production engine code, Net::QUIC, sibling modules, public API,
+or dependency floors changed.
+
+CI on the exact documentation source commit PASSED:
+- Perl 5.20, 5.28, 5.36, 5.44, tests, POD, distcheck/disttest, staged
+  native-header and PAUSE-indexing tests:
+  https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/40261193399
+- Independent public-server and quic-go interoperability:
+  https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/40261193243
+- Previously passing Linux::Event real QUIC/TLS smoke on unchanged
+  implementation commit 8fa64811ef5d2f8b30708cf0f2e15d9e946d6bee:
+  https://github.com/haxmeister/perl-Unblock-HTTP3/actions/runs/40236723594
+
+RELEASE READY: Main contains the verified source and docs/RELEASE-0.14.md.
+No v0.14 tag, GitHub release or CPAN upload was performed. Publication
+remains with the maintainer.
+
+---
+
 # MAIN RELEASE-PREPARED: perl-Unblock-HTTP3 0.14 - 2026-10-25
 
 The maintainer explicitly authorized moving the completed, tested
